@@ -1,0 +1,1 @@
+print("adaptiverag is wired up correctly.")

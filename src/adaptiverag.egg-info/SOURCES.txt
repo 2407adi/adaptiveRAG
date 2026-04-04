@@ -1,0 +1,6 @@
+pyproject.toml
+src/adaptiverag/__init__.py
+src/adaptiverag.egg-info/PKG-INFO
+src/adaptiverag.egg-info/SOURCES.txt
+src/adaptiverag.egg-info/dependency_links.txt
+src/adaptiverag.egg-info/top_level.txt
