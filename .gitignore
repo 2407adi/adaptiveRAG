@@ -1,1 +1,7 @@
-.env, .venv, __pycache__, .pytest_cache, .mypy_cache, .vscode/
+.env
+.venv
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.vscode/
+.DS_Store

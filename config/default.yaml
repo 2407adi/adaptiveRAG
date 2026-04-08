@@ -1,0 +1,27 @@
+# ── LLM ─────────────────────────────────────────────
+llm:
+  provider: "azure_openai"       # swap to "openai" or "ollama" later
+  model: "gpt-4o"
+  temperature: 0.7
+  max_tokens: 4096
+
+# ── Embeddings ──────────────────────────────────────
+embeddings:
+  provider: "azure_openai"
+  model: "text-embedding-ada-002"
+
+# ── Chunking ────────────────────────────────────────
+chunking:
+  strategy: "recursive"          # recursive, sentence, semantic
+  chunk_size: 512
+  chunk_overlap: 50
+
+# ── Vector DB ───────────────────────────────────────
+vector_db:
+  provider: "chroma"             # chroma, qdrant, pinecone
+  collection_name: "default"
+
+# ── Retrieval ───────────────────────────────────────
+retrieval:
+  top_k: 5
+  score_threshold: 0.7
