@@ -25,3 +25,8 @@ vector_db:
 retrieval:
   top_k: 5
   score_threshold: 0.7
+  mode: hybrid          # "dense", "sparse", or "hybrid"
+  hybrid:
+    rrf_k: 60
+    weight_dense: 1.0
+    weight_sparse: 1.0

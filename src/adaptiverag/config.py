@@ -8,6 +8,7 @@ from pathlib import Path
 import os
 import yaml
 from dotenv import load_dotenv
+from typing import Optional
 
 # ── Locate project root (two levels up from this file) ──
 # src/adaptiverag/config.py  →  adaptiverag/
@@ -57,9 +58,24 @@ class VectorDBConfig:
 
 
 @dataclass
+class HybridConfig:
+    rrf_k: int = 60
+    weight_dense: float = 1.0
+    weight_sparse: float = 1.0
+
+
+@dataclass
 class RetrievalConfig:
     top_k: int = 5
     score_threshold: float = 0.7
+    mode: str = "hybrid"
+    hybrid: Optional[HybridConfig] = None
+
+    def __post_init__(self):
+        if self.hybrid is None:
+            self.hybrid = HybridConfig()
+        elif isinstance(self.hybrid, dict):
+            self.hybrid = HybridConfig(**self.hybrid)
 
 
 @dataclass

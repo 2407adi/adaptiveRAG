@@ -5,3 +5,8 @@ __pycache__/
 .mypy_cache/
 .vscode/
 .DS_Store
+*.egg-info/
+.chroma/
+.env
+*.pyc
+src/adaptiverag.egg-info/

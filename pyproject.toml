@@ -8,7 +8,15 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "python-dotenv>=1.0",
-    "pyyaml>=6.0", "bs4>=4.0", "pypdf>=6.9.0", "python-docx>=1.2.0", "numpy>=2.4.0"
+    "pyyaml>=6.0",
+    "beautifulsoup4>=4.12",
+    "pypdf>=4.0",
+    "python-docx>=1.1",
+    "numpy>=1.26",
+    "chromadb>=0.4",
+    "faiss-cpu>=1.7",
+    "sentence-transformers>=2.2",
+    "openai>=1.0",
 ]
 
 [tool.setuptools.packages.find]
