@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from ..retrieve.vector_store import VectorStore, SearchResult
 from ..ingest.embedder import Embedder
 
@@ -36,11 +38,12 @@ class RAGChain:
         sources = [
                     {
                         "chunk_id": r.chunk_id,
-                        "source": r.metadata.get("source", "unknown"),
+                        "source": Path(r.metadata.get("source", "unknown")).name,
                         "page": r.metadata.get("page", ""),
                         "chunk_index": r.metadata.get("chunk_index", "unknown"),
                         "score": round(r.score, 4),
                         "text_preview": r.text[:200],
+                        "full_text": r.text,
                     }
                     for r in results
                 ]
@@ -64,21 +67,25 @@ class RAGChain:
     def _build_prompt(self, question: str, context: str) -> str:
         """Build the final prompt sent to the LLM."""
         return f"""You are a helpful assistant with access to the user's documents.
-                Use the context below as your primary source of information, especially for
-                domain-specific or proprietary details. You may also draw on your general
-                knowledge to provide complete, well-rounded answers — but when your general
-                knowledge conflicts with the provided context, prefer the context.
+Use the context below as your primary source of information, especially for
+domain-specific or proprietary details. You may also draw on your general
+knowledge to provide complete, well-rounded answers — but when your general
+knowledge conflicts with the provided context, prefer the context.
 
-                Always cite the provided context using bracket notation like [1], [2] when
-                referencing specific claims from the documents. If you use general knowledge
-                that is NOT from the context, do not add a citation — just state it naturally.
+Always cite the provided context using bracket notation like [1], [2] when
+referencing specific claims from the documents. If you use general knowledge
+that is NOT from the context, do not add a citation — just state it naturally.
 
-                If the context doesn't contain enough information and you cannot supplement
-                with general knowledge, say so clearly.
+If the context doesn't contain enough information and you cannot supplement
+with general knowledge, say so clearly.
 
-                Context:
-                {context}
+Formatting rules:
+- For mathematical formulas, use LaTeX with $...$ for inline math and $$...$$ for block equations.
+- Use markdown formatting for structure (headers, bold, lists).
 
-                Question: {question}
+Context:
+{context}
 
-                Answer:"""
+Question: {question}
+
+Answer:"""

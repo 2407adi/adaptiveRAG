@@ -10,3 +10,5 @@ __pycache__/
 .env
 *.pyc
 src/adaptiverag.egg-info/
+data/chroma_store/
+ui/static/uploads/
