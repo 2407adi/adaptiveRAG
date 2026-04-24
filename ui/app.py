@@ -20,6 +20,8 @@ from adaptiverag.ingest.embedder import create_embedder
 from adaptiverag.ingest.pipeline import IngestPipeline
 from adaptiverag.retrieve.vector_store import create_vector_store
 from adaptiverag.reason.chain import RAGChain
+from adaptiverag.retrieve.query_expander import QueryExpander
+
 from llm_client import AzureLLMClient
 from components import render_sources
 
@@ -62,12 +64,16 @@ def init_pipeline():
         max_tokens=settings.llm.max_tokens,
     )
 
-    # 7. RAG chain
+    # 7. Query expander (uses same LLM client)
+    query_expander = QueryExpander(llm_client)
+
+    # 8. RAG chain
     rag_chain = RAGChain(
         vector_store=vector_store,
         embedder=embedder,
         llm_client=llm_client,
         top_k=settings.retrieval.top_k,
+        query_expander=query_expander,
     )
 
     # ── Stash everything in session state ──
@@ -136,6 +142,16 @@ def render_sidebar():
         file_count = len(st.session_state.ingested_files)
         st.metric("Files ingested", file_count)
         st.metric("Chunks indexed", chunk_count)
+        # ── Retrieval settings ──
+        st.divider()
+        st.subheader("Settings")
+        st.session_state.expand_queries = st.toggle(
+            "Smart query expansion",
+            value=False,
+            help="Uses the LLM to rewrite your question with synonyms "
+                 "and technical terms before searching. May improve "
+                 "results for vague or short queries.",
+        )
 
 def render_chat():
     """Main chat area: display history, handle new input."""
@@ -168,7 +184,10 @@ def render_chat():
         # 2. Generate response
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                response = st.session_state.rag_chain.query(user_input)
+                response = st.session_state.rag_chain.query(
+                    user_input,
+                    expand=st.session_state.get("expand_queries", False),
+                )
 
             st.markdown(response["answer"])
             if response["sources"]:

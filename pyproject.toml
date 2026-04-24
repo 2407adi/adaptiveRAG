@@ -17,6 +17,8 @@ dependencies = [
     "faiss-cpu>=1.7",
     "sentence-transformers>=2.2",
     "openai>=1.0",
+    "pytesseract>=0.3.10",
+    "pdf2image>=1.16",
 ]
 
 [tool.setuptools.packages.find]
