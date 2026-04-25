@@ -30,3 +30,49 @@ retrieval:
     rrf_k: 60
     weight_dense: 1.0
     weight_sparse: 1.0
+
+# ── Routing ───────────────────────────────────────
+routing:
+  fallback: "rag"
+  examples:
+    # DIRECT — no documents needed
+    - query: "What is 2+2?"
+      route: "direct"
+      reason: "Simple math, general knowledge"
+    - query: "Hello, how are you?"
+      route: "direct"
+      reason: "Greeting, no document context needed"
+    - query: "What is machine learning?"
+      route: "direct"
+      reason: "General definition, LLM already knows this"
+    - query: "Translate 'hello' to Spanish"
+      route: "direct"
+      reason: "Language task, no documents involved"
+
+    # RAG — single retrieval from documents
+    - query: "What does section 3.2 say?"
+      route: "rag"
+      reason: "References a specific document section"
+    - query: "What are the key risks mentioned in the report?"
+      route: "rag"
+      reason: "Asks about content within uploaded documents"
+    - query: "How is capital ratio defined in the document?"
+      route: "rag"
+      reason: "Needs a specific definition from the documents"
+    - query: "List the main points from the summary"
+      route: "rag"
+      reason: "Extraction from a single document section"
+
+    # MULTI_STEP — cross-document reasoning
+    - query: "Compare the terms across all contracts"
+      route: "multi_step"
+      reason: "Cross-document comparison requires multiple retrievals"
+    - query: "How do the risk factors in document A differ from document B?"
+      route: "multi_step"
+      reason: "Explicit comparison between two documents"
+    - query: "Summarize the key themes across all uploaded files"
+      route: "multi_step"
+      reason: "Synthesis across multiple documents"
+    - query: "What contradictions exist between the reports?"
+      route: "multi_step"
+      reason: "Requires analyzing and cross-referencing multiple sources"

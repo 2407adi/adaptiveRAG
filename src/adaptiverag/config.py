@@ -84,6 +84,15 @@ class AzureConfig:
     api_key: str = ""
     deployment: str = ""
 
+@dataclass
+class RoutingConfig:
+    fallback: str = "rag"
+    examples: Optional[list[dict]] = None
+
+    def __post_init__(self):
+        if self.examples is None:
+            self.examples = []
+
 
 @dataclass
 class Settings:
@@ -93,6 +102,7 @@ class Settings:
     vector_db: VectorDBConfig = field(default_factory=VectorDBConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     azure: AzureConfig = field(default_factory=AzureConfig)
+    routing: RoutingConfig = field(default_factory=RoutingConfig)
 
 
 def load_settings() -> Settings:
@@ -116,6 +126,7 @@ def load_settings() -> Settings:
             api_key=os.getenv("AZURE_OPENAI_API_KEY", ""),
             deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", ""),
         ),
+        routing=RoutingConfig(**cfg.get("routing", {})),
     )
 
 
