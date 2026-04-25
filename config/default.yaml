@@ -76,3 +76,7 @@ routing:
     - query: "What contradictions exist between the reports?"
       route: "multi_step"
       reason: "Requires analyzing and cross-referencing multiple sources"
+
+# ── Reasoning ─────────────────────────────────────
+reasoning:
+  max_sub_questions: 4

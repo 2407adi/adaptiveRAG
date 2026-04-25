@@ -19,10 +19,11 @@ from adaptiverag.ingest.chunker import RecursiveChunker
 from adaptiverag.ingest.embedder import create_embedder
 from adaptiverag.ingest.pipeline import IngestPipeline
 from adaptiverag.retrieve.vector_store import create_vector_store
-from adaptiverag.reason.chain import RAGChain
+from adaptiverag.reason.chain import RAGChain, MultiStepChain
 from adaptiverag.retrieve.query_expander import QueryExpander
+from adaptiverag.reason.router import QueryRouter, QueryRoute
 
-from llm_client import AzureLLMClient
+from adaptiverag.llm_client import AzureLLMClient
 from components import render_sources
 
 
@@ -76,6 +77,19 @@ def init_pipeline():
         query_expander=query_expander,
     )
 
+    # 9. Query router (classifies incoming questions)
+    router = QueryRouter(
+        llm_client=llm_client,
+        examples=settings.routing.examples,
+    )
+
+    # 10. Multi-step chain (for complex MULTI_STEP queries)
+    multi_step_chain = MultiStepChain(
+        rag_chain=rag_chain,
+        llm_client=llm_client,
+        max_sub_questions=4,
+    )
+
     # ── Stash everything in session state ──
     st.session_state.embedder = embedder
     st.session_state.vector_store = vector_store
@@ -84,6 +98,9 @@ def init_pipeline():
     st.session_state.messages = []        # chat history
     st.session_state.ingested_files = set()  # track what's been uploaded
     st.session_state.initialized = True
+    st.session_state.router = router
+    st.session_state.multi_step_chain = multi_step_chain
+    st.session_state.llm_client = llm_client
 
 def ingest_uploads(files):
     """Save uploaded files to static/uploads/, then run the ingest pipeline."""
@@ -158,11 +175,6 @@ def render_chat():
 
     st.title("AdaptiveRAG Chat")
 
-    # ── Guard: need documents before chatting ──
-    if st.session_state.vector_store.count() == 0:
-        st.info("Upload and ingest some documents to start chatting.")
-        return
-
     # ── Render conversation history ──
     for msg in st.session_state.messages:
         with st.chat_message(msg["role"]):
@@ -181,13 +193,37 @@ def render_chat():
             "sources": [],
         })
 
-        # 2. Generate response
+        # 2. Route and generate response
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                response = st.session_state.rag_chain.query(
-                    user_input,
-                    expand=st.session_state.get("expand_queries", False),
-                )
+            with st.spinner("Classifying question..."):
+                route_result = st.session_state.router.classify(user_input)
+
+            expand = st.session_state.get("expand_queries", False)
+
+            if route_result.route == QueryRoute.DIRECT:
+                with st.spinner("Thinking..."):
+                    answer = st.session_state.llm_client.generate(user_input)
+                    response = {"answer": answer, "sources": []}
+
+            elif route_result.route == QueryRoute.MULTI_STEP:
+                with st.spinner("Breaking down your question..."):
+                    response = st.session_state.multi_step_chain.query(
+                        user_input, expand=expand,
+                    )
+
+                # Show the reasoning trace
+                if response.get("reasoning_steps"):
+                    with st.expander("🧠 Reasoning Steps", expanded=False):
+                        for i, step in enumerate(response["reasoning_steps"], 1):
+                            st.markdown(f"**Step {i}: {step['sub_question']}**")
+                            st.caption(step["answer"])
+                            if i < len(response["reasoning_steps"]):
+                                st.divider()
+            else:
+                with st.spinner("Thinking..."):
+                    response = st.session_state.rag_chain.query(
+                        user_input, expand=expand,
+                    )
 
             st.markdown(response["answer"])
             if response["sources"]:
