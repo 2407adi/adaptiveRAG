@@ -24,7 +24,9 @@ from adaptiverag.retrieve.query_expander import QueryExpander
 from adaptiverag.reason.router import QueryRouter, QueryRoute
 
 from adaptiverag.llm_client import AzureLLMClient
-from components import render_sources
+from components import render_sources, render_grounding
+
+from adaptiverag.reason.grounding import GroundingValidator
 
 
 def init_pipeline():
@@ -90,6 +92,12 @@ def init_pipeline():
         max_sub_questions=4,
     )
 
+    # 11. Grounding validator (hallucination detection)
+    grounding_validator = GroundingValidator(
+        llm_client=llm_client,
+        threshold=0.6,
+    )
+
     # ── Stash everything in session state ──
     st.session_state.embedder = embedder
     st.session_state.vector_store = vector_store
@@ -101,6 +109,7 @@ def init_pipeline():
     st.session_state.router = router
     st.session_state.multi_step_chain = multi_step_chain
     st.session_state.llm_client = llm_client
+    st.session_state.grounding_validator = grounding_validator
 
 def ingest_uploads(files):
     """Save uploaded files to static/uploads/, then run the ingest pipeline."""
@@ -181,6 +190,8 @@ def render_chat():
             st.markdown(msg["content"])
             if msg.get("sources"):
                 render_sources(msg["sources"])
+            if msg.get("grounding"):
+                render_grounding(msg["grounding"])
 
     # ── Handle new user input ──
     if user_input := st.chat_input("Ask a question about your documents..."):
@@ -227,12 +238,19 @@ def render_chat():
 
             st.markdown(response["answer"])
             if response["sources"]:
+                with st.spinner("Checking answer grounding..."):
+                    grounding = st.session_state.grounding_validator.validate(
+                        response["answer"], response["sources"]
+                    )
+                    response["grounding"] = grounding
                 render_sources(response["sources"])
+                render_grounding(response.get("grounding"))
 
         st.session_state.messages.append({
             "role": "assistant",
             "content": response["answer"],
             "sources": response["sources"],
+            "grounding": response.get("grounding"),
         })
 
 def main():
