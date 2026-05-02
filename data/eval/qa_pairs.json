@@ -1,0 +1,203 @@
+[
+  {
+    "id": "q001",
+    "question": "What is the capital of France?",
+    "ground_truth": "Paris.",
+    "expected_route": "DIRECT",
+    "relevant_sources": [],
+    "diagnostic_intent": "Baseline DIRECT route — pure general knowledge. If router sends this through RAG and the answer comes back with citations, the routing fix listed in CLAUDE.md pre-deploy blockers is regressing."
+  },
+  {
+    "id": "q002",
+    "question": "What does the acronym SLA stand for?",
+    "ground_truth": "Service Level Agreement.",
+    "expected_route": "DIRECT",
+    "relevant_sources": [],
+    "diagnostic_intent": "General-knowledge term that also appears in the corpus (MSA doc). Tests that the router does not over-trigger RAG just because the term shows up in the docs."
+  },
+  {
+    "id": "q003",
+    "question": "What is 1248 divided by 4?",
+    "ground_truth": "312.",
+    "expected_route": "DIRECT",
+    "relevant_sources": [],
+    "diagnostic_intent": "Arithmetic — should never go through retrieval."
+  },
+  {
+    "id": "q004",
+    "question": "When was Solstice Robotics founded?",
+    "ground_truth": "April 2021.",
+    "expected_route": "RAG",
+    "relevant_sources": ["company_overview.md"],
+    "diagnostic_intent": "Easy single-doc factual lookup. Baseline RAG sanity check — if this regresses, retrieval is broken."
+  },
+  {
+    "id": "q005",
+    "question": "Who are the founders of Solstice Robotics and what are their roles?",
+    "ground_truth": "Maya Chen is the CEO and Daniel Okafor is the CTO.",
+    "expected_route": "RAG",
+    "relevant_sources": ["company_overview.md"],
+    "diagnostic_intent": "Multi-entity extraction from a single chunk. Tests that the answer captures both names and both roles, not just one."
+  },
+  {
+    "id": "q006",
+    "question": "Does Solstice allow employees to work from home?",
+    "ground_truth": "Yes — Solstice operates a remote-flexible policy. Engineering ICs may work remotely up to four days per week, but hardware roles and on-site customer-deployment leads are expected at the Austin or Pittsburgh facility full-time.",
+    "expected_route": "RAG",
+    "relevant_sources": ["company_overview.md"],
+    "diagnostic_intent": "Paraphrase test. The doc says 'remote-flexible policy'; the question uses 'work from home'. If retrieval is keyword-only, this regresses. Tests semantic retrieval and the dense leg of hybrid."
+  },
+  {
+    "id": "q007",
+    "question": "How many employees does Solstice have as of September 2025?",
+    "ground_truth": "87 full-time employees.",
+    "expected_route": "RAG",
+    "relevant_sources": ["company_overview.md", "q3_2025_financial_summary.md"],
+    "diagnostic_intent": "The number 87 appears in two docs (consistent). Tests whether retrieval surfaces both, and whether the answer commits to a specific number rather than hedging."
+  },
+  {
+    "id": "q008",
+    "question": "When was incident IR-2025-014 detected?",
+    "ground_truth": "On 2025-08-14 at 03:22 UTC.",
+    "expected_route": "RAG",
+    "relevant_sources": ["incident_report_IR-2025-014.md"],
+    "diagnostic_intent": "Precise-timestamp test. A weak system flattens this to 'August 2025' or '14 August 2025'; a strong one preserves the UTC time to the minute."
+  },
+  {
+    "id": "q009",
+    "question": "What was the root cause of incident IR-2025-014?",
+    "ground_truth": "A floating-point overflow in the ankle torque PID controller. Under payload greater than 18 kg combined with stride length greater than 62 cm, the 32-bit floating-point intermediate term exceeded the representable range of the downstream fixed-point conversion, wrapping to a large negative value. The actuator interpreted this as a maximum-magnitude reverse torque command for one ~2 ms control cycle, producing the observed ankle oscillation. The bug was introduced in the v3.4.0 to v3.4.1 ankle-controller refactor; existing unit tests did not cover the conversion bridge under extreme inputs.",
+    "expected_route": "RAG",
+    "relevant_sources": ["incident_report_IR-2025-014.md"],
+    "diagnostic_intent": "Long technical explanation. Tests whether the answer preserves the technical specifics (numerical thresholds, version numbers, the conversion-bridge detail) without paraphrasing them away into vagueness."
+  },
+  {
+    "id": "q010",
+    "question": "What was Solstice's recognized revenue in Q3 2025?",
+    "ground_truth": "$3.7M.",
+    "expected_route": "RAG",
+    "relevant_sources": ["q3_2025_financial_summary.md"],
+    "diagnostic_intent": "Exact-number retrieval from a markdown table. Tests whether the chunker preserves table structure well enough for the row to be retrievable."
+  },
+  {
+    "id": "q011",
+    "question": "What percentage of Q3 2025 revenue came from a single customer, and which one?",
+    "ground_truth": "62% of Q3 2025 revenue came from FreightCo.",
+    "expected_route": "RAG",
+    "relevant_sources": ["q3_2025_financial_summary.md"],
+    "diagnostic_intent": "Specific number tied to a named entity. Both must be correct — partial credit on either alone is wrong."
+  },
+  {
+    "id": "q012",
+    "question": "Does Solstice Robotics have any policy on AI safety or responsible AI use?",
+    "ground_truth": "The provided documents do not address AI safety or responsible AI policy. There is no information in the corpus from which to answer this question.",
+    "expected_route": "RAG",
+    "relevant_sources": [],
+    "diagnostic_intent": "TRICK QUESTION — silent-gap test. The corpus contains nothing on this topic. A faithful system says 'not addressed'; a hallucinator invents a plausible-sounding policy. Faithfulness should be 1.0 only if the answer admits no info; if the system makes things up, faithfulness will tank.",
+    "skip_metrics": ["answer_relevancy", "context_recall"]
+  },
+  {
+    "id": "q013",
+    "question": "What is the SLA uptime commitment in the FreightCo MSA?",
+    "ground_truth": "99.5% fleet availability measured per calendar quarter.",
+    "expected_route": "RAG",
+    "relevant_sources": ["vendor_msa_freightco_excerpt.md"],
+    "diagnostic_intent": "Single-fact lookup in legalese. Baseline retrieval check on the structurally-different (numbered-section) doc."
+  },
+  {
+    "id": "q014",
+    "question": "If FreightCo's fleet availability is 98.5% in a quarter, what service credit are they entitled to under the MSA?",
+    "ground_truth": "25% of the quarterly service fee. The shortfall is 1.0 percentage point below the 99.5% commitment, which under the formula of 5% per 0.1pp would yield 50%, but the MSA caps service credits at 25% of the quarterly fee in any single quarter.",
+    "expected_route": "RAG",
+    "relevant_sources": ["vendor_msa_freightco_excerpt.md"],
+    "diagnostic_intent": "SLA-CAP TRAP. The naive computation produces 50% and ignores the cap. A correct answer applies the cap. This is the highest-value single regression detector — if a prompt change makes the model compute-and-cite without applying constraints, this question catches it."
+  },
+  {
+    "id": "q015",
+    "question": "Are facility power outages at FreightCo's site covered under the MSA SLA?",
+    "ground_truth": "No. Section 4.3 of the MSA explicitly excludes downtime caused by FreightCo's own facility infrastructure (power, network, environmental control) from the availability calculation.",
+    "expected_route": "RAG",
+    "relevant_sources": ["vendor_msa_freightco_excerpt.md"],
+    "diagnostic_intent": "Negation / exclusion-clause test. The 'wrong' answer (yes, it's covered) is what a system gets if it retrieves the SLA section but misses the exclusion clause that follows. Tests reading comprehension on adjacent chunks."
+  },
+  {
+    "id": "q016",
+    "question": "When was firmware v3.5 originally targeted to ship?",
+    "ground_truth": "Q4 2025. It was subsequently delayed to Q1 2026.",
+    "expected_route": "RAG",
+    "relevant_sources": ["product_roadmap_2026.md"],
+    "diagnostic_intent": "The original target is mentioned in a parenthetical in the roadmap. Tests whether retrieval surfaces the parenthetical context and whether the answer captures both the original date and the slip."
+  },
+  {
+    "id": "q017",
+    "question": "What is the notice period required to terminate the FreightCo MSA for convenience?",
+    "ground_truth": "90 days' written notice (after the initial 24-month term).",
+    "expected_route": "RAG",
+    "relevant_sources": ["vendor_msa_freightco_excerpt.md"],
+    "diagnostic_intent": "Multiple-numbers-in-one-section trap. Section 9 contains five distinct time periods (24, 12, 60, 90, 30 days/months). The model must pick the right one for 'termination for convenience' specifically."
+  },
+  {
+    "id": "q018",
+    "question": "What was the Series A funding amount and when did it close?",
+    "ground_truth": "The provided documents are inconsistent about the amount: the company overview states $14.2M while the Q3 2025 financial summary states $14.5M. Both documents agree the round closed in Q1 2024 (the overview specifies March 2024) at a $58M post-money valuation, led by Ridgeline Ventures with participation from Foundation Park Capital and three angel investors.",
+    "expected_route": "RAG",
+    "relevant_sources": ["company_overview.md", "q3_2025_financial_summary.md"],
+    "diagnostic_intent": "CONTRADICTION TRAP. The two source docs give different Series A amounts ($14.2M vs $14.5M). A faithful system flags the inconsistency; a hallucinator picks one silently or invents an average. Faithfulness scoring becomes interesting here — 'documents disagree' is technically supported by both contexts, so should score high."
+  },
+  {
+    "id": "q019",
+    "question": "Why was the SR-2 firmware v3.5 release delayed, and what was the impact on the 2026 roadmap?",
+    "ground_truth": "The v3.5 release was delayed from Q4 2025 to Q1 2026 because of the regression-testing expansion mandated after incident IR-2025-014 — a floating-point overflow in the ankle torque controller that affected three of seven SR-2 units at FreightCo Distribution Center #7. Action item #2 from the incident postmortem explicitly directs engineering leadership to delay the v3.5 feature release by one quarter to absorb the expanded regression testing. The roadmap reflects this slip in its Q1 2026 entry.",
+    "expected_route": "MULTI_STEP",
+    "relevant_sources": ["incident_report_IR-2025-014.md", "product_roadmap_2026.md"],
+    "diagnostic_intent": "Causal chain across two docs. The roadmap names the slip; the incident report explains the cause. Decomposition should produce sub-questions that fetch from each doc separately. If MultiStepChain returns sources from only one doc, retrieval recall regressed."
+  },
+  {
+    "id": "q020",
+    "question": "If Solstice maintains its current burn rate without raising more capital or generating any new revenue, when does the company run out of cash?",
+    "ground_truth": "Approximately late February 2026. Cash on hand at the end of Q3 2025 was $9.4M and net burn averages ~$1.8M per month, giving roughly 5.2 months of runway from end of September 2025 — consistent with the 'late February 2026' projection stated in the financial summary's forward-look section.",
+    "expected_route": "MULTI_STEP",
+    "relevant_sources": ["q3_2025_financial_summary.md"],
+    "diagnostic_intent": "Numerical computation. Single-doc but multi-step in reasoning: retrieve burn, retrieve cash, divide, infer date. Tests whether the chain decomposes correctly and whether arithmetic is right (the doc itself states the answer too, so a lazy system can also just retrieve the conclusion — both are acceptable)."
+  },
+  {
+    "id": "q021",
+    "question": "How does Solstice's planned 2026 hiring compare to its current headcount, and what would the year-end 2026 headcount be if every planned role is filled and there is no attrition?",
+    "ground_truth": "Current headcount as of 30 September 2025 is 87. The 2026 plan adds 24 engineers, 6 GTM (sales plus customer success), 2 G&A, and 1 recruiter — totaling +33 roles. With no attrition, year-end 2026 headcount would be 120.",
+    "expected_route": "MULTI_STEP",
+    "relevant_sources": ["company_overview.md", "product_roadmap_2026.md"],
+    "diagnostic_intent": "Cross-doc arithmetic: combine headcount from one doc with the hiring plan from another, then add. Tests whether decomposition pulls from both docs and whether the synthesis step does the arithmetic correctly."
+  },
+  {
+    "id": "q022",
+    "question": "What is Solstice's customer concentration risk, and what concrete steps in the 2026 roadmap address it?",
+    "ground_truth": "62% of Q3 2025 revenue came from a single customer (FreightCo), and the board has asked that this be brought below 50% by end of FY2026. Two roadmap items address concentration: (1) the Q2 2026 SR-3 alpha customer deployment, with a target customer that is explicitly not FreightCo, and (2) the Q3 2026 second-customer go-live with LinearChain (currently at LOI stage, definitive contract required by end of Q1 2026).",
+    "expected_route": "MULTI_STEP",
+    "relevant_sources": ["q3_2025_financial_summary.md", "product_roadmap_2026.md"],
+    "diagnostic_intent": "Synthesis across financial risk and roadmap mitigation. Tests whether the decomposition identifies 'what is the risk' as one sub-question and 'what mitigations exist' as another, and whether the synthesis ties them together."
+  },
+  {
+    "id": "q023",
+    "question": "What was the financial impact of incident IR-2025-014, and how did it affect Q3 2025 results?",
+    "ground_truth": "The incident resulted in $420,000 of service credits issued to FreightCo under the MSA SLA terms, recognized in Q3 2025. This contributed to Q3 revenue coming in at $3.7M against a plan of $4.1M — the financial summary attributes the miss in roughly equal parts to (a) these SLA credits and (b) the deferral of one DC#5 acceptance milestone into Q4.",
+    "expected_route": "MULTI_STEP",
+    "relevant_sources": ["incident_report_IR-2025-014.md", "q3_2025_financial_summary.md"],
+    "diagnostic_intent": "Causal connection across operations and financials. The $420K figure appears in both docs (cross-validation opportunity). Tests whether sources are de-duplicated correctly across sub-question results."
+  },
+  {
+    "id": "q024",
+    "question": "List every concrete time period or notice requirement specified in the FreightCo MSA termination section.",
+    "ground_truth": "Section 9 of the MSA specifies five time periods: (1) an initial term of 24 months from the Effective Date; (2) automatic 12-month renewal terms thereafter; (3) 60 days' written notice required to prevent automatic renewal; (4) 90 days' written notice required for termination for convenience after the initial term; and (5) a 30 days' written notice and cure period for termination for material breach.",
+    "expected_route": "MULTI_STEP",
+    "relevant_sources": ["vendor_msa_freightco_excerpt.md"],
+    "diagnostic_intent": "Aggregation/listing. Single doc but requires extracting all instances of a category. Tests whether the chain enumerates exhaustively or stops short. A common regression: returning 3 of 5 time periods because the chain only looked at one chunk."
+  },
+  {
+    "id": "q025",
+    "question": "What are Solstice's exposure points around its FreightCo relationship, considering both the contract terms and recent operational issues?",
+    "ground_truth": "Solstice's exposure to FreightCo is multi-faceted: (1) Customer concentration — 62% of Q3 2025 revenue came from FreightCo, well above the board's 50% target by end of FY2026; (2) SLA exposure — the MSA commits Solstice to 99.5% fleet availability per quarter, with service credits up to a 25% cap of the quarterly service fee for shortfalls; (3) Realized SLA cost — incident IR-2025-014 produced $420,000 in service credits in Q3 2025 and 14 days of degraded service at DC#7; (4) IP exposure — under MSA Section 7.1, FreightCo retains all rights to operational data generated at its facilities; (5) Termination risk — either party can terminate for convenience on 90 days' notice after the initial 24-month term, with auto-renewal blockable on 60 days' notice.",
+    "expected_route": "MULTI_STEP",
+    "relevant_sources": ["company_overview.md", "q3_2025_financial_summary.md", "incident_report_IR-2025-014.md", "vendor_msa_freightco_excerpt.md"],
+    "diagnostic_intent": "Broad cross-doc synthesis spanning four documents. Tests retrieval recall (does the chain pull chunks from all four docs across its sub-questions?) and synthesis quality (does the final answer organize the exposure points coherently?). If MultiStepChain only surfaces sources from two of the four expected docs, retrieval recall is regressing on broad questions."
+  }
+]

@@ -1,0 +1,1 @@
+"""Evaluation framework — RAGAS-style metrics and a suite to run them."""
