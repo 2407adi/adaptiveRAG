@@ -552,6 +552,7 @@ if __name__ == "__main__":
     from adaptiverag.retrieve.vector_store import create_vector_store
     from adaptiverag.retrieve.query_expander import QueryExpander
     from adaptiverag.llm_client import AzureLLMClient
+    from adaptiverag.ingest.summarizer import CorpusSummarizer
 
     logging.basicConfig(
         level=logging.INFO,
@@ -572,6 +573,21 @@ if __name__ == "__main__":
         persist_directory=str(persist_dir),
     )
 
+    # ── LLM client (built early — summarizer + chains both need it) ──
+    llm_client = AzureLLMClient(
+        endpoint=settings.azure.endpoint,
+        api_key=settings.azure.api_key,
+        deployment=settings.azure.deployment,
+        temperature=settings.llm.temperature,
+        max_tokens=settings.llm.max_tokens,
+    )
+
+    # ── Corpus summarizer (sidecar next to the eval chroma store) ──
+    summarizer = CorpusSummarizer(
+        llm_client=llm_client,
+        persist_path=persist_dir / "_corpus_summary.txt",
+    )
+
     # Auto-ingest the eval corpus on first run (or if the dir is wiped)
     if vector_store.count() == 0:
         logger.info("Eval vector store is empty — ingesting corpus...")
@@ -580,22 +596,19 @@ if __name__ == "__main__":
             chunk_overlap=settings.chunking.chunk_overlap,
         )
         loader = DocumentLoader()
-        ingest_pipeline = IngestPipeline(loader, chunker, embedder, vector_store)
+        ingest_pipeline = IngestPipeline(
+            loader, chunker, embedder, vector_store, summarizer=summarizer,
+        )
         corpus_dir = PROJECT_ROOT / "data" / "eval" / "corpus"
         result = ingest_pipeline.ingest(str(corpus_dir))
         logger.info(
             "Ingested %d files, %d chunks",
             result["files_processed"], result["total_chunks"],
         )
-
-    # ── LLM + RAG components ──
-    llm_client = AzureLLMClient(
-        endpoint=settings.azure.endpoint,
-        api_key=settings.azure.api_key,
-        deployment=settings.azure.deployment,
-        temperature=settings.llm.temperature,
-        max_tokens=settings.llm.max_tokens,
-    )
+        logger.info(
+            "Corpus summary: %s",
+            "generated" if result.get("corpus_summary") else "skipped/failed",
+        )
 
     query_expander = QueryExpander(llm_client)
 
@@ -610,6 +623,7 @@ if __name__ == "__main__":
     router = QueryRouter(
         llm_client=llm_client,
         examples=settings.routing.examples,
+        corpus_summary=summarizer.load(),
     )
 
     multi_step_chain = MultiStepChain(

@@ -5,6 +5,7 @@ from .chunker import BaseChunker
 from .embedder import Embedder
 from .models import Document
 from ..retrieve.vector_store import VectorStore, StoredChunk
+from .summarizer import CorpusSummarizer
 
 
 class IngestPipeline:
@@ -16,11 +17,13 @@ class IngestPipeline:
         chunker: BaseChunker,
         embedder: Embedder,
         vector_store: VectorStore,
+        summarizer: CorpusSummarizer | None = None,
     ):
         self.loader = loader
         self.chunker = chunker
         self.embedder = embedder
         self.vector_store = vector_store
+        self.summarizer = summarizer
 
     def ingest(self, source_path: str) -> dict:
         """Process all documents in a directory and index them."""
@@ -56,9 +59,14 @@ class IngestPipeline:
         # Store everything in one batch
         self.vector_store.add(all_vector_chunks)
 
+        corpus_summary: str | None = None
+        if self.summarizer is not None and documents:
+            corpus_summary = self.summarizer.generate_and_save(documents)
+
         return {
             "files_processed": len(set(
                 c.metadata.get("source", "") for c in all_vector_chunks
             )),
             "total_chunks": len(all_vector_chunks),
+            "corpus_summary": corpus_summary,
         }

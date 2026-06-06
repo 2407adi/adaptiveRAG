@@ -116,7 +116,7 @@ referencing specific claims from the documents. If you use general knowledge
 that is NOT from the context, do not add a citation — just state it naturally.
 
 If the context doesn't contain enough information and you cannot supplement
-with general knowledge, say so clearly.
+with general knowledge, say so clearly. If sources disagree on a fact, present both versions and note the conflict.
 
 Formatting rules:
 - For mathematical formulas, use LaTeX with $...$ for inline math and $$...$$ for block equations.

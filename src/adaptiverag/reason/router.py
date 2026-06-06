@@ -25,19 +25,19 @@ class QueryRouter:
 
     FALLBACK_ROUTE = QueryRoute.RAG  # Safe default — retrieval never hurts
 
-    def __init__(self, llm_client, examples: list[dict] | None = None):
-        """
-        Args:
-            llm_client: Your existing AzureLLMClient (or any object with .generate(prompt) -> str)
-            examples: Few-shot examples from config. Each dict has 'query', 'route', 'reason'.
-        """
+    def __init__(
+        self,
+        llm_client,
+        examples: list[dict] | None = None,
+        corpus_summary: str | None = None,
+    ):
         self.llm = llm_client
         self.examples = examples or []
+        self.corpus_summary = corpus_summary
 
     def _build_prompt(self, query: str) -> str:
         """Build the few-shot classification prompt."""
 
-        # Format each example as a line: Q: "..." → ROUTE (reason)
         example_lines = []
         for ex in self.examples:
             example_lines.append(
@@ -45,28 +45,48 @@ class QueryRouter:
             )
         examples_block = "\n".join(example_lines)
 
-        return f"""You are a query routing classifier for a document Q&A system.
-    The user has uploaded documents. Classify their query into exactly one category:
+        corpus_block = (
+            "\n<corpus_summary>\n"
+            "The user has uploaded documents to this Q&A system. The paragraph "
+            "below summarizes the topics, entities, and key facts those documents "
+            "contain. Use it to judge whether the question's subject is actually "
+            "present in the corpus.\n\n"
+            f"{self.corpus_summary}\n"
+            "</corpus_summary>\n"
+            if self.corpus_summary else ""
+        )
 
-    DIRECT — General knowledge, math, greetings, definitions. No document context needed.
-    RAG — Needs information from the uploaded documents. Single lookup or factual extraction.
-    MULTI_STEP — Requires comparing, synthesizing, or analyzing across multiple parts or documents.
+        return f"""<task>
+    You are a query routing classifier for a document Q&A system. The user has uploaded their own documents and is now asking questions. Classify each incoming question into exactly one of three execution paths.
+    </task>
 
-    Examples:
+    <routes>
+    DIRECT — Answer from your own general knowledge. Greetings, math, definitions, or questions whose subject is NOT covered by the uploaded documents.
+    RAG — Retrieve from the uploaded documents. Single-fact lookup or factual extraction where the subject IS present in the documents.
+    MULTI_STEP — Multi-document reasoning. Comparing, synthesizing, or analyzing across multiple parts or documents.
+    </routes>
+    {corpus_block}
+    <examples>
     {examples_block}
+    </examples>
 
-    Rules:
-    - If the query mentions specific sections, pages, or "the document", it is RAG.
-    - If the query asks to compare, contrast, summarize across, or analyze multiple things, it is MULTI_STEP.
+    <rules>
+    - If the question's subject appears in <corpus_summary>, prefer RAG (or MULTI_STEP if compositional).
+    - If the question's subject is clearly NOT in <corpus_summary>, prefer DIRECT — the documents will not contain the answer.
+    - If the question mentions specific sections, pages, or "the document", it is RAG.
+    - If the question asks to compare, contrast, summarize across multiple things, or analyze relationships, it is MULTI_STEP.
     - If unsure between RAG and MULTI_STEP, choose RAG.
-    - If unsure between DIRECT and RAG, choose RAG.
+    - If <corpus_summary> is absent and the question doesn't obviously need general knowledge, choose RAG.
+    </rules>
+
+    <question>
+    {query}
+    </question>
 
     Respond in EXACTLY this format, nothing else:
-    ROUTE: <category>
-    CONFIDENCE: <high/medium/low>
-    REASON: <one sentence>
-
-    Q: "{query}" →"""
+    ROUTE: <DIRECT|RAG|MULTI_STEP>
+    CONFIDENCE: <high|medium|low>
+    REASON: <one sentence>"""
 
     def _parse_response(self, response: str) -> RouteResult:
         """Parse the LLM's structured response into a RouteResult."""

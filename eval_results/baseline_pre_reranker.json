@@ -1,0 +1,701 @@
+{
+  "timestamp": "2026-05-02T14:27:16.569327+00:00",
+  "dataset_path": "/Users/adityachauhan/Documents/Claude/Projects/The LLM Saga/adaptiveRAG/data/eval/qa_pairs.json",
+  "summary": {
+    "total_samples": 25,
+    "error_count": 0,
+    "per_metric": {
+      "router_accuracy": {
+        "n": 25,
+        "mean": 0.88,
+        "min": 0.0,
+        "max": 1.0
+      },
+      "faithfulness": {
+        "n": 21,
+        "mean": 0.9217687074829932,
+        "min": 0.0,
+        "max": 1.0
+      },
+      "answer_relevancy": {
+        "n": 24,
+        "mean": 0.8044202344285117,
+        "min": 0.5513439973195394,
+        "max": 0.9323360919952393
+      },
+      "context_recall": {
+        "n": 20,
+        "mean": 0.8001388888888888,
+        "min": 0.0,
+        "max": 1.0
+      },
+      "context_precision": {
+        "n": 20,
+        "mean": 0.8264285714285714,
+        "min": 0.0,
+        "max": 1.0
+      }
+    },
+    "per_metric_per_route": {
+      "router_accuracy": {
+        "DIRECT": {
+          "n": 4,
+          "mean": 0.75
+        },
+        "RAG": {
+          "n": 16,
+          "mean": 0.875
+        },
+        "MULTI_STEP": {
+          "n": 5,
+          "mean": 1.0
+        }
+      },
+      "faithfulness": {
+        "DIRECT": {
+          "n": 0,
+          "mean": null
+        },
+        "RAG": {
+          "n": 16,
+          "mean": 0.8973214285714286
+        },
+        "MULTI_STEP": {
+          "n": 5,
+          "mean": 1.0
+        }
+      },
+      "answer_relevancy": {
+        "DIRECT": {
+          "n": 4,
+          "mean": 0.8894998182853063
+        },
+        "RAG": {
+          "n": 15,
+          "mean": 0.7954465548197428
+        },
+        "MULTI_STEP": {
+          "n": 5,
+          "mean": 0.7632776061693828
+        }
+      },
+      "context_recall": {
+        "DIRECT": {
+          "n": 0,
+          "mean": null
+        },
+        "RAG": {
+          "n": 15,
+          "mean": 0.7972222222222223
+        },
+        "MULTI_STEP": {
+          "n": 5,
+          "mean": 0.8088888888888889
+        }
+      },
+      "context_precision": {
+        "DIRECT": {
+          "n": 0,
+          "mean": null
+        },
+        "RAG": {
+          "n": 15,
+          "mean": 0.8569444444444444
+        },
+        "MULTI_STEP": {
+          "n": 5,
+          "mean": 0.7348809523809524
+        }
+      }
+    }
+  },
+  "samples": [
+    {
+      "id": "q001",
+      "question": "What is the capital of France?",
+      "expected_route": "DIRECT",
+      "actual_route": "DIRECT",
+      "answer": "The capital of France is **Paris**.",
+      "context_count": 0,
+      "context_sources": [],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": null,
+        "answer_relevancy": 0.9262928565343221,
+        "context_recall": null,
+        "context_precision": null
+      },
+      "error": null,
+      "diagnostic_intent": "Baseline DIRECT route — pure general knowledge. If router sends this through RAG and the answer comes back with citations, the routing fix listed in CLAUDE.md pre-deploy blockers is regressing."
+    },
+    {
+      "id": "q002",
+      "question": "What does the acronym SLA stand for?",
+      "expected_route": "DIRECT",
+      "actual_route": "DIRECT",
+      "answer": "The acronym **SLA** commonly stands for **Service Level Agreement**. It is a formal agreement between a service provider and a customer that defines the level of service expected, including metrics such as performance, availability, and responsibilities. \n\nHowever, depending on the context, SLA can also stand for:\n\n- **Second Language Acquisition** (in linguistics and education).\n- **Shared Line Appearance** (in telecommunications).\n- **Service Level Assurance** (in IT and networking).\n- **Stereo Lithography Apparatus** (in 3D printing technology).\n\nThe specific meaning depends on the industry or field in which it is used.",
+      "context_count": 0,
+      "context_sources": [],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": null,
+        "answer_relevancy": 0.8064426978429159,
+        "context_recall": null,
+        "context_precision": null
+      },
+      "error": null,
+      "diagnostic_intent": "General-knowledge term that also appears in the corpus (MSA doc). Tests that the router does not over-trigger RAG just because the term shows up in the docs."
+    },
+    {
+      "id": "q003",
+      "question": "What is 1248 divided by 4?",
+      "expected_route": "DIRECT",
+      "actual_route": "DIRECT",
+      "answer": "To divide 1248 by 4:\n\n\\[\n1248 \\div 4 = 312\n\\]\n\nSo, **1248 divided by 4 is 312**.",
+      "context_count": 0,
+      "context_sources": [],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": null,
+        "answer_relevancy": 0.9141016006469727,
+        "context_recall": null,
+        "context_precision": null
+      },
+      "error": null,
+      "diagnostic_intent": "Arithmetic — should never go through retrieval."
+    },
+    {
+      "id": "q004",
+      "question": "When was Solstice Robotics founded?",
+      "expected_route": "RAG",
+      "actual_route": "DIRECT",
+      "answer": "Solstice Robotics was founded in **2023**. It is a relatively new company specializing in advanced robotics solutions designed to tackle challenges in various industries. Let me know if you'd like more information about their work!",
+      "context_count": 0,
+      "context_sources": [],
+      "scores": {
+        "router_accuracy": 0.0,
+        "faithfulness": null,
+        "answer_relevancy": 0.9111621181170145,
+        "context_recall": null,
+        "context_precision": null
+      },
+      "error": null,
+      "diagnostic_intent": "Easy single-doc factual lookup. Baseline RAG sanity check — if this regresses, retrieval is broken."
+    },
+    {
+      "id": "q005",
+      "question": "Who are the founders of Solstice Robotics and what are their roles?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "The founders of Solstice Robotics are **Maya Chen** and **Daniel Okafor**. Maya Chen is the **CEO**, and Daniel Okafor is the **CTO** [2], [3].",
+      "context_count": 5,
+      "context_sources": [
+        "product_roadmap_2026.md",
+        "company_overview.md",
+        "company_overview.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.801842192808787,
+        "context_recall": 1.0,
+        "context_precision": 0.5833333333333333
+      },
+      "error": null,
+      "diagnostic_intent": "Multi-entity extraction from a single chunk. Tests that the answer captures both names and both roles, not just one."
+    },
+    {
+      "id": "q006",
+      "question": "Does Solstice allow employees to work from home?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "Yes, Solstice allows employees to work from home under a **remote-flexible** policy. Engineering individual contributors (ICs) may work remotely up to four days per week. However, hardware roles and on-site customer deployment leads are required to work full-time at the Austin or Pittsburgh facilities [2].",
+      "context_count": 5,
+      "context_sources": [
+        "company_overview.md",
+        "company_overview.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "company_overview.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.6320879459381104,
+        "context_recall": 1.0,
+        "context_precision": 0.8666666666666667
+      },
+      "error": null,
+      "diagnostic_intent": "Paraphrase test. The doc says 'remote-flexible policy'; the question uses 'work from home'. If retrieval is keyword-only, this regresses. Tests semantic retrieval and the dense leg of hybrid."
+    },
+    {
+      "id": "q007",
+      "question": "How many employees does Solstice have as of September 2025?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "As of September 30, 2025, Solstice has **87 full-time employees** [1].",
+      "context_count": 5,
+      "context_sources": [
+        "company_overview.md",
+        "product_roadmap_2026.md",
+        "vendor_msa_freightco_excerpt.md",
+        "product_roadmap_2026.md",
+        "company_overview.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.8862152894337972,
+        "context_recall": 1.0,
+        "context_precision": 0.7
+      },
+      "error": null,
+      "diagnostic_intent": "The number 87 appears in two docs (consistent). Tests whether retrieval surfaces both, and whether the answer commits to a specific number rather than hedging."
+    },
+    {
+      "id": "q008",
+      "question": "When was incident IR-2025-014 detected?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "Incident IR-2025-014 was detected on **2025-08-14 at 03:22 UTC** [1].",
+      "context_count": 5,
+      "context_sources": [
+        "incident_report_IR-2025-014.md",
+        "incident_report_IR-2025-014.md",
+        "incident_report_IR-2025-014.md",
+        "incident_report_IR-2025-014.md",
+        "company_overview.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.9288061062494913,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      },
+      "error": null,
+      "diagnostic_intent": "Precise-timestamp test. A weak system flattens this to 'August 2025' or '14 August 2025'; a strong one preserves the UTC time to the minute."
+    },
+    {
+      "id": "q009",
+      "question": "What was the root cause of incident IR-2025-014?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "The root cause of incident **IR-2025-014** was related to the firmware update **v3.4.1**, which caused gait instability in three of the seven SR-2 units deployed at FreightCo Distribution Center #7. Specifically, the affected units exhibited intermittent ankle dorsiflexion oscillation under load. This issue led to two documented falls, although no injuries occurred (one shelving unit was damaged). Units that had not yet received the update were unaffected, indicating that the problem was introduced with the v3.4.1 firmware [1], [3].",
+      "context_count": 5,
+      "context_sources": [
+        "incident_report_IR-2025-014.md",
+        "incident_report_IR-2025-014.md",
+        "incident_report_IR-2025-014.md",
+        "incident_report_IR-2025-014.md",
+        "q3_2025_financial_summary.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.5513439973195394,
+        "context_recall": 0.16666666666666666,
+        "context_precision": 1.0
+      },
+      "error": null,
+      "diagnostic_intent": "Long technical explanation. Tests whether the answer preserves the technical specifics (numerical thresholds, version numbers, the conversion-bridge detail) without paraphrasing them away into vagueness."
+    },
+    {
+      "id": "q010",
+      "question": "What was Solstice's recognized revenue in Q3 2025?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "Solstice's recognized revenue in Q3 2025 was **$3.7M** [1].",
+      "context_count": 5,
+      "context_sources": [
+        "q3_2025_financial_summary.md",
+        "q3_2025_financial_summary.md",
+        "company_overview.md",
+        "product_roadmap_2026.md",
+        "q3_2025_financial_summary.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.9323360919952393,
+        "context_recall": 1.0,
+        "context_precision": 0.8666666666666667
+      },
+      "error": null,
+      "diagnostic_intent": "Exact-number retrieval from a markdown table. Tests whether the chunker preserves table structure well enough for the row to be retrievable."
+    },
+    {
+      "id": "q011",
+      "question": "What percentage of Q3 2025 revenue came from a single customer, and which one?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "62% of Q3 2025 revenue came from a single customer, FreightCo [1].",
+      "context_count": 5,
+      "context_sources": [
+        "q3_2025_financial_summary.md",
+        "q3_2025_financial_summary.md",
+        "q3_2025_financial_summary.md",
+        "q3_2025_financial_summary.md",
+        "product_roadmap_2026.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.7843780120213827,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      },
+      "error": null,
+      "diagnostic_intent": "Specific number tied to a named entity. Both must be correct — partial credit on either alone is wrong."
+    },
+    {
+      "id": "q012",
+      "question": "Does Solstice Robotics have any policy on AI safety or responsible AI use?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "The provided context does not explicitly mention any policy on AI safety or responsible AI use for Solstice Robotics. If such a policy exists, it is not included in the referenced documents. You may need to consult additional resources or company documentation to determine if such policies are in place.",
+      "context_count": 5,
+      "context_sources": [
+        "product_roadmap_2026.md",
+        "company_overview.md",
+        "vendor_msa_freightco_excerpt.md",
+        "company_overview.md",
+        "vendor_msa_freightco_excerpt.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 0.0,
+        "answer_relevancy": null,
+        "context_recall": null,
+        "context_precision": null
+      },
+      "error": null,
+      "diagnostic_intent": "TRICK QUESTION — silent-gap test. The corpus contains nothing on this topic. A faithful system says 'not addressed'; a hallucinator invents a plausible-sounding policy. Faithfulness should be 1.0 only if the answer admits no info; if the system makes things up, faithfulness will tank."
+    },
+    {
+      "id": "q013",
+      "question": "What is the SLA uptime commitment in the FreightCo MSA?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "The SLA uptime commitment in the FreightCo MSA is **99.5% fleet availability**, measured per calendar quarter. Fleet availability is defined as the ratio of unit-hours operationally available to scheduled unit-hours across all SR-2 units deployed at the customer's covered sites [2].",
+      "context_count": 5,
+      "context_sources": [
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "incident_report_IR-2025-014.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.7167151172955831,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      },
+      "error": null,
+      "diagnostic_intent": "Single-fact lookup in legalese. Baseline retrieval check on the structurally-different (numbered-section) doc."
+    },
+    {
+      "id": "q014",
+      "question": "If FreightCo's fleet availability is 98.5% in a quarter, what service credit are they entitled to under the MSA?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "To calculate the service credit FreightCo is entitled to if fleet availability is 98.5%:\n\n1. **Determine the shortfall from the availability commitment:**  \n   The availability commitment is 99.5%. If fleet availability is 98.5%, the shortfall is:  \n   $$ 99.5\\% - 98.5\\% = 1.0\\% $$\n\n2. **Convert the shortfall into 0.1% increments:**  \n   Each 0.1% (or fraction thereof) below 99.5% results in a 5% service credit. A 1.0% shortfall equals:  \n   $$ \\frac{1.0\\%}{0.1\\%} = 10 \\text{ increments} $$\n\n3. **Calculate the total service credit:**  \n   For each increment, FreightCo is entitled to 5% of the quarterly service fee. Therefore:  \n   $$ 10 \\times 5\\% = 50\\% $$\n\n4. **Apply the cap on service credits:**  \n   The MSA caps service credits at **25% of the quarterly service fee in any single quarter** [1]. Thus, even though the calculated credit is 50%, FreightCo is entitled to the maximum cap of **25%**.\n\n**Final Answer:** FreightCo is entitled to a service credit of **25% of the quarterly service fee**.",
+      "context_count": 5,
+      "context_sources": [
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "q3_2025_financial_summary.md",
+        "company_overview.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 0.8571428571428571,
+        "answer_relevancy": 0.8374202052752177,
+        "context_recall": 0.3333333333333333,
+        "context_precision": 1.0
+      },
+      "error": null,
+      "diagnostic_intent": "SLA-CAP TRAP. The naive computation produces 50% and ignores the cap. A correct answer applies the cap. This is the highest-value single regression detector — if a prompt change makes the model compute-and-cite without applying constraints, this question catches it."
+    },
+    {
+      "id": "q015",
+      "question": "Are facility power outages at FreightCo's site covered under the MSA SLA?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "No, facility power outages at FreightCo's site are not covered under the MSA SLA. Downtime caused by FreightCo's own facility infrastructure, which includes power, network, and environmental control, is explicitly excluded from availability calculations as per the SLA terms [1].",
+      "context_count": 5,
+      "context_sources": [
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "incident_report_IR-2025-014.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.8364759286244711,
+        "context_recall": 1.0,
+        "context_precision": 0.8875
+      },
+      "error": null,
+      "diagnostic_intent": "Negation / exclusion-clause test. The 'wrong' answer (yes, it's covered) is what a system gets if it retrieves the SLA section but misses the exclusion clause that follows. Tests reading comprehension on adjacent chunks."
+    },
+    {
+      "id": "q016",
+      "question": "When was firmware v3.5 originally targeted to ship?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "Firmware v3.5 was originally targeted to ship one quarter earlier than its revised schedule, as it has been delayed by one quarter to absorb the regression-testing expansion [3]. However, the exact original target date is not explicitly mentioned in the provided context.",
+      "context_count": 5,
+      "context_sources": [
+        "incident_report_IR-2025-014.md",
+        "company_overview.md",
+        "incident_report_IR-2025-014.md",
+        "incident_report_IR-2025-014.md",
+        "incident_report_IR-2025-014.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.8115412394205729,
+        "context_recall": 0.0,
+        "context_precision": 0.0
+      },
+      "error": null,
+      "diagnostic_intent": "The original target is mentioned in a parenthetical in the roadmap. Tests whether retrieval surfaces the parenthetical context and whether the answer captures both the original date and the slip."
+    },
+    {
+      "id": "q017",
+      "question": "What is the notice period required to terminate the FreightCo MSA for convenience?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "The notice period required to terminate the FreightCo Master Services Agreement (MSA) for convenience is **90 days' written notice**, and this can be done at any time after the initial term of 24 months [3].",
+      "context_count": 5,
+      "context_sources": [
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.8399117986361185,
+        "context_recall": 1.0,
+        "context_precision": 1.0
+      },
+      "error": null,
+      "diagnostic_intent": "Multiple-numbers-in-one-section trap. Section 9 contains five distinct time periods (24, 12, 60, 90, 30 days/months). The model must pick the right one for 'termination for convenience' specifically."
+    },
+    {
+      "id": "q018",
+      "question": "What was the Series A funding amount and when did it close?",
+      "expected_route": "RAG",
+      "actual_route": "RAG",
+      "answer": "The Series A funding amount was **$14.2M**, and it closed in **March 2024** [1].",
+      "context_count": 5,
+      "context_sources": [
+        "company_overview.md",
+        "q3_2025_financial_summary.md",
+        "q3_2025_financial_summary.md",
+        "q3_2025_financial_summary.md",
+        "q3_2025_financial_summary.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 0.5,
+        "answer_relevancy": 0.773176888624827,
+        "context_recall": 0.625,
+        "context_precision": 1.0
+      },
+      "error": null,
+      "diagnostic_intent": "CONTRADICTION TRAP. The two source docs give different Series A amounts ($14.2M vs $14.5M). A faithful system flags the inconsistency; a hallucinator picks one silently or invents an average. Faithfulness scoring becomes interesting here — 'documents disagree' is technically supported by both contexts, so should score high."
+    },
+    {
+      "id": "q019",
+      "question": "Why was the SR-2 firmware v3.5 release delayed, and what was the impact on the 2026 roadmap?",
+      "expected_route": "MULTI_STEP",
+      "actual_route": "MULTI_STEP",
+      "answer": "### Why was the SR-2 firmware v3.5 release delayed, and what was the impact on the 2026 roadmap?\n\nThe delay of the SR-2 firmware v3.5 release can be attributed to expanded regression testing requirements. While the exact reasons for the delay are not explicitly detailed in the available context, it is clear that this additional testing was mandated following the incident described in IR-2025-014 [Sub-question 2]. This suggests that the delay was likely a precautionary measure to ensure the reliability and safety of the firmware before its deployment.\n\nAs a result, the release of SR-2 firmware v3.5, originally scheduled for Q4 2025, was postponed to Q1 2026. This delay had a direct impact on the 2026 roadmap. Specifically, the deployment timeline for the full FreightCo fleet was adjusted to accommodate the updated release schedule, pushing the original plan into early 2026 [Sub-question 2].\n\n### Reasoning and Conclusions:\n- The expanded regression testing required after the IR-2025-014 incident appears to be the primary factor contributing to the delay, although no additional details about the incident or its direct implications are provided [Sub-question 2].\n- The delay in the firmware release caused a shift in project timelines, forcing the 2026 roadmap to be adjusted to reflect the new Q1 2026 deployment schedule for the SR-2 firmware v3.5 [Sub-question 2].\n- While the reasons for the delay are not fully elaborated, the connection between the incident, the increased testing requirements, and the subsequent timeline shift is clearly established.\n\nIf further details about the incident or the testing process are available, they could provide more insight into the underlying causes of the delay. However, based on the current information, the delay and its impact on the 2026 roadmap can be summarized as a necessary adjustment to ensure product quality and safety.",
+      "context_count": 6,
+      "context_sources": [
+        "incident_report_IR-2025-014.md",
+        "incident_report_IR-2025-014.md",
+        "company_overview.md",
+        "incident_report_IR-2025-014.md",
+        "company_overview.md",
+        "product_roadmap_2026.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.8766733010609945,
+        "context_recall": 0.8,
+        "context_precision": 0.8541666666666666
+      },
+      "error": null,
+      "diagnostic_intent": "Causal chain across two docs. The roadmap names the slip; the incident report explains the cause. Decomposition should produce sub-questions that fetch from each doc separately. If MultiStepChain returns sources from only one doc, retrieval recall regressed."
+    },
+    {
+      "id": "q020",
+      "question": "If Solstice maintains its current burn rate without raising more capital or generating any new revenue, when does the company run out of cash?",
+      "expected_route": "MULTI_STEP",
+      "actual_route": "MULTI_STEP",
+      "answer": "### Synthesized Answer\n\nIf Solstice maintains its current burn rate of **$1.8M per month** without raising additional capital or generating new revenue, the company will run out of cash in approximately **5.2 months** from the end of Q3 2025 (30 September 2025). This estimate is based on the following reasoning:\n\n1. **Current Burn Rate**: Solstice's monthly cash burn is $1.8M [1].\n2. **Cash on Hand**: As of 30 September 2025, the company has $9.4M in cash [2].\n3. **Revenue and Capital-Raising Context**: While Solstice has been generating revenue—$3.7M in Q3 2025—it appears that this revenue is insufficient to offset the burn rate. Moreover, no additional capital-raising plans or significant new revenue streams were identified in the provided context [3][5].\n\nBy dividing the available cash ($9.4M) by the burn rate ($1.8M per month), we determine that Solstice has approximately **5.2 months of runway** remaining. This suggests the company will exhaust its cash reserves around mid-February 2026, assuming no changes to its financial situation.\n\n### Important Considerations\n- While revenue growth is mentioned in passing, there is no indication that it is sufficient to meaningfully reduce the burn rate or extend the runway [3][5].\n- If the company secures additional funding or significantly increases revenue, this timeline could change. However, such measures are not currently documented in the available information.\n\nIn conclusion, **Solstice's financial runway is projected to last until mid-February 2026 under the current conditions**. To avoid running out of cash, the company will need to either reduce its burn rate, generate substantial new revenue, or raise additional capital.",
+      "context_count": 7,
+      "context_sources": [
+        "q3_2025_financial_summary.md",
+        "company_overview.md",
+        "vendor_msa_freightco_excerpt.md",
+        "product_roadmap_2026.md",
+        "vendor_msa_freightco_excerpt.md",
+        "q3_2025_financial_summary.md",
+        "company_overview.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.719407339890798,
+        "context_recall": 1.0,
+        "context_precision": 0.6666666666666666
+      },
+      "error": null,
+      "diagnostic_intent": "Numerical computation. Single-doc but multi-step in reasoning: retrieve burn, retrieve cash, divide, infer date. Tests whether the chain decomposes correctly and whether arithmetic is right (the doc itself states the answer too, so a lazy system can also just retrieve the conclusion — both are acceptable)."
+    },
+    {
+      "id": "q021",
+      "question": "How does Solstice's planned 2026 hiring compare to its current headcount, and what would the year-end 2026 headcount be if every planned role is filled and there is no attrition?",
+      "expected_route": "MULTI_STEP",
+      "actual_route": "MULTI_STEP",
+      "answer": "### How does Solstice's planned 2026 hiring compare to its current headcount, and what would the year-end 2026 headcount be if every planned role is filled and there is no attrition?\n\nSolstice currently has a headcount of **87 full-time employees** as of 30 September 2025 [Sub-question 1]. For 2026, the company plans to hire **33 new employees**, comprising **24 engineers**, **6 GTM roles (sales and customer success)**, **2 general and administrative (G&A)** positions, and **1 recruiter** [Sub-question 2]. This planned hiring reflects the company's focus on expanding its technical, sales, and support teams to support its growth objectives.\n\nTo determine the year-end 2026 headcount, we add the **current headcount (87)** to the **planned hires (33)**. Assuming every planned role is filled and there is no attrition, the total headcount at the end of 2026 would be:\n\n$$\n\\text{Total Headcount at End of 2026} = 87 + 33 = 120\n$$\n\nThus, the **year-end 2026 headcount would be 120 employees** [Sub-question 3]. \n\n### Reasoning and Connections:\n1. **Comparing planned hiring to current headcount:** The planned hiring of 33 employees represents a **37.9% increase** over the current headcount of 87. This signifies a significant growth effort, particularly in engineering and sales roles, as the company adds technical capacity and strengthens its go-to-market (GTM) capabilities [Sub-question 2].\n2. **Impact on end-of-year headcount:** By adding the planned hires to the existing headcount, we calculate a straightforward increase to 120 employees by the end of 2026, assuming no attrition [Sub-question 3].\n\n### Conclusion:\nIf Solstice executes its 2026 hiring plan fully and experiences no attrition, its headcount will grow from 87 to **120 employees**, reflecting a **37.9% increase** and a strategic focus on scaling engineering, sales, and support functions.",
+      "context_count": 10,
+      "context_sources": [
+        "company_overview.md",
+        "vendor_msa_freightco_excerpt.md",
+        "product_roadmap_2026.md",
+        "vendor_msa_freightco_excerpt.md",
+        "company_overview.md",
+        "product_roadmap_2026.md",
+        "product_roadmap_2026.md",
+        "product_roadmap_2026.md",
+        "q3_2025_financial_summary.md",
+        "q3_2025_financial_summary.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.8024508158365885,
+        "context_recall": 1.0,
+        "context_precision": 0.7329365079365079
+      },
+      "error": null,
+      "diagnostic_intent": "Cross-doc arithmetic: combine headcount from one doc with the hiring plan from another, then add. Tests whether decomposition pulls from both docs and whether the synthesis step does the arithmetic correctly."
+    },
+    {
+      "id": "q022",
+      "question": "What is Solstice's customer concentration risk, and what concrete steps in the 2026 roadmap address it?",
+      "expected_route": "MULTI_STEP",
+      "actual_route": "MULTI_STEP",
+      "answer": "### Solstice's Customer Concentration Risk and Steps in the 2026 Roadmap to Address It\n\n**Customer Concentration Risk:**  \nSolstice faces a significant customer concentration risk, as **62% of its Q3 2025 recognized revenue was derived from a single customer, FreightCo**. This heavy reliance on one client creates financial vulnerability, as any disruption in the relationship with FreightCo could substantially impact Solstice’s revenue. Acknowledging this risk, the company's board has set a target to reduce FreightCo's revenue contribution to **below 50% by the end of FY2026** [Sub-question 1].\n\n**Steps in the 2026 Roadmap:**  \nThe details provided do not explicitly outline concrete steps in Solstice's 2026 roadmap to address this risk. While the board has set a clear goal to reduce revenue dependence on FreightCo, no specific strategies for achieving this—such as diversifying the customer base, onboarding new clients, or expanding into new markets—are mentioned in the current context. This lack of detail limits our understanding of how Solstice plans to meet the board’s directive [Sub-question 2].\n\n**Conclusion and Reasoning:**  \nThe customer concentration risk is well-defined, with FreightCo dominating Solstice’s revenue stream. However, there is a gap in the available information regarding actionable steps to mitigate this risk. While the board's directive to reduce FreightCo's revenue share to below 50% by FY2026 is a clear objective, the lack of documented strategies in the roadmap raises concerns about how Solstice intends to achieve this target. Addressing this omission will likely require further clarification or documentation on diversification efforts.\n\nIf additional materials become available, they could provide insight into specific initiatives being undertaken to mitigate this critical vulnerability.",
+      "context_count": 7,
+      "context_sources": [
+        "company_overview.md",
+        "q3_2025_financial_summary.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "company_overview.md",
+        "product_roadmap_2026.md",
+        "product_roadmap_2026.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.7246646881103516,
+        "context_recall": 0.8,
+        "context_precision": 0.42063492063492064
+      },
+      "error": null,
+      "diagnostic_intent": "Synthesis across financial risk and roadmap mitigation. Tests whether the decomposition identifies 'what is the risk' as one sub-question and 'what mitigations exist' as another, and whether the synthesis ties them together."
+    },
+    {
+      "id": "q023",
+      "question": "What was the financial impact of incident IR-2025-014, and how did it affect Q3 2025 results?",
+      "expected_route": "MULTI_STEP",
+      "actual_route": "RAG",
+      "answer": "Incident **IR-2025-014** had a financial impact of $420,000 in Q3 2025. This amount reflects the **SLA service credits** issued as a result of the incident, which were a key factor in the $400,000 shortfall between the planned Q3 revenue of $4.1M and the actual revenue of $3.7M. The SLA credits contributed to the revenue miss in roughly equal parts with the deferral of a milestone related to DC#5 into Q4 due to customer scheduling [1], [2].",
+      "context_count": 5,
+      "context_sources": [
+        "q3_2025_financial_summary.md",
+        "incident_report_IR-2025-014.md",
+        "q3_2025_financial_summary.md",
+        "product_roadmap_2026.md",
+        "q3_2025_financial_summary.md"
+      ],
+      "scores": {
+        "router_accuracy": 0.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.8192396362622579,
+        "context_recall": 1.0,
+        "context_precision": 0.95
+      },
+      "error": null,
+      "diagnostic_intent": "Causal connection across operations and financials. The $420K figure appears in both docs (cross-validation opportunity). Tests whether sources are de-duplicated correctly across sub-question results."
+    },
+    {
+      "id": "q024",
+      "question": "List every concrete time period or notice requirement specified in the FreightCo MSA termination section.",
+      "expected_route": "MULTI_STEP",
+      "actual_route": "RAG",
+      "answer": "The FreightCo MSA termination section specifies the following concrete time periods or notice requirements:\n\n1. **Initial term length**: 24 months from the Effective Date [2].\n2. **Automatic renewal period**: 12 months unless notice is given [2].\n3. **Notice for non-renewal**: Written notice must be provided at least 60 days before the end of the then-current term [2].\n4. **Termination for convenience**: Either party may terminate with 90 days' written notice at any time after the initial term [4].\n5. **Termination for cause**: Either party may terminate for material breach with 30 days' written notice if the breach is not cured within the notice period [4].",
+      "context_count": 5,
+      "context_sources": [
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md"
+      ],
+      "scores": {
+        "router_accuracy": 0.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.7802078723907471,
+        "context_recall": 0.8333333333333334,
+        "context_precision": 1.0
+      },
+      "error": null,
+      "diagnostic_intent": "Aggregation/listing. Single doc but requires extracting all instances of a category. Tests whether the chain enumerates exhaustively or stops short. A common regression: returning 3 of 5 time periods because the chain only looked at one chunk."
+    },
+    {
+      "id": "q025",
+      "question": "What are Solstice's exposure points around its FreightCo relationship, considering both the contract terms and recent operational issues?",
+      "expected_route": "MULTI_STEP",
+      "actual_route": "MULTI_STEP",
+      "answer": "### Analysis of Solstice's Exposure Points in Its FreightCo Relationship\n\nTo evaluate Solstice's exposure points with FreightCo, we must consider both the **contract terms** and the **recent operational dynamics**. Here is a synthesized analysis:\n\n---\n\n### **1. Service Level Agreement (SLA) Compliance**\nSolstice is contractually obligated to maintain **99.5% fleet availability** per calendar quarter for its SR-2 units at FreightCo facilities [Sub-question 1, Sub-question 3]. Failing to meet this SLA results in **service credits**, which are applied as offsets against future invoices and are FreightCo's **sole remedy** for non-compliance [Sub-question 1]. \n\nWhile this provision limits financial liability, **persistent SLA failures could strain the relationship** with FreightCo and damage Solstice's reputation as a reliable partner. Furthermore, operational issues (e.g., system outages, downtime) — even those excluded under the SLA, such as FreightCo infrastructure failures or force majeure events [Sub-question 3, Sub-question 4] — may still lead to disputes. If FreightCo perceives Solstice as unreliable or non-cooperative, it could seek to renegotiate terms or consider termination after the initial 24-month term of the contract [Sub-question 3].\n\n---\n\n### **2. Intellectual Property (IP) and Data Usage**\nThe contract carefully delineates IP ownership:\n- Solstice retains rights to its **machine learning models, software, and system architecture** — including any improvements derived from operational data, provided these improvements do not identify FreightCo or its facilities [Sub-question 1, Sub-question 3].\n- FreightCo retains ownership of **operational data** (e.g., telemetry, video, task logs) generated by SR-2 units [Sub-question 4].\n\nThis creates potential exposure points:\n- **Perceived Misuse of Data:** FreightCo may scrutinize how Solstice uses operational data for improvement, especially if there is ambiguity about whether the derived improvements indirectly reveal FreightCo's operations [Sub-question 4].\n- **Ambiguity in Sponsored Features:** Jointly developed features (funded by FreightCo) are governed by separate Statements of Work. Poorly defined SOW terms could lead to disputes about ownership, licensing, or usage rights [Sub-question 1, Sub-question 3].\n\n---\n\n### **3. Termination Risks**\nThe contract has a **24-month initial term**, after which it renews automatically for 12-month periods unless terminated with 60 days' notice [Sub-question 1]. However, operational issues — such as repeated SLA breaches or unresolved disputes over downtime exclusions — could prompt FreightCo to terminate the contract or refuse renewal. \n\nLosing FreightCo, described as Solstice's **flagship customer**, would pose a severe reputational and financial risk [Sub-question 4]. As a strategic partner, FreightCo's dissatisfaction could also undermine Solstice's ability to attract and retain other clients.\n\n---\n\n### **4. Downtime Exclusions and Disputes**\nSLA availability calculations exclude downtime caused by:\n- FreightCo's facility issues (e.g., power, network problems)\n- Force majeure events\n- Scheduled maintenance agreed upon in advance [Sub-question 1].\n\nWhile these exclusions protect Solstice to some extent, they may become a source of **disputes** if FreightCo challenges whether specific downtime incidents fall under these categories. Misalignment on this issue could amplify conflict, especially if FreightCo perceives Solstice as deflecting responsibility [Sub-question 3, Sub-question 4].\n\n---\n\n### **5. Financial Exposure via Service Credits**\nAlthough service credits are the sole remedy for SLA non-compliance, they represent a direct financial loss and signal performance issues to FreightCo [Sub-question 3, Sub-question 4]. If these issues persist, FreightCo might pressure Solstice for stricter penalties or revised terms during future contract negotiations.\n\n---\n\n### **6. Strategic Partnership Risks**\nFreightCo is described as a critical partner for Solstice, likely serving as a reference client to attract additional business. Operational issues or strained relations — whether due to SLA compliance, IP disputes, or other factors — could damage this partnership and harm Solstice's broader market credibility [Sub-question 4].\n\n---\n\n### **Conclusion**\nSolstice's exposure points in its relationship with FreightCo revolve around **SLA compliance**, **IP and data management**, **termination risks**, and **partnership stability**. While the contract provides some safeguards (e.g., service credits as the exclusive remedy, downtime exclusions), these mechanisms may not fully protect against reputational damage or future contract renegotiations. Furthermore, the lack of information on recent operational issues makes it unclear whether these risks have already been realized.\n\nTo mitigate these risks, Solstice should prioritize:\n1. Proactive SLA management and transparent communication about downtime exclusions.\n2. Clear documentation and adherence to data usage policies to prevent IP disputes.\n3. Strengthening the strategic partnership with FreightCo to ensure future contract renewals.\n\nBy addressing these factors, Solstice can reduce its exposure and solidify its relationship with FreightCo, safeguarding both its financial performance and reputation.",
+      "context_count": 6,
+      "context_sources": [
+        "company_overview.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md",
+        "vendor_msa_freightco_excerpt.md"
+      ],
+      "scores": {
+        "router_accuracy": 1.0,
+        "faithfulness": 1.0,
+        "answer_relevancy": 0.6931918859481812,
+        "context_recall": 0.4444444444444444,
+        "context_precision": 1.0
+      },
+      "error": null,
+      "diagnostic_intent": "Broad cross-doc synthesis spanning four documents. Tests retrieval recall (does the chain pull chunks from all four docs across its sub-questions?) and synthesis quality (does the final answer organize the exposure points coherently?). If MultiStepChain only surfaces sources from two of the four expected docs, retrieval recall is regressing on broad questions."
+    }
+  ]
+}

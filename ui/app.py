@@ -22,6 +22,7 @@ from adaptiverag.retrieve.vector_store import create_vector_store
 from adaptiverag.reason.chain import RAGChain, MultiStepChain
 from adaptiverag.retrieve.query_expander import QueryExpander
 from adaptiverag.reason.router import QueryRouter, QueryRoute
+from adaptiverag.ingest.summarizer import CorpusSummarizer
 
 from adaptiverag.llm_client import AzureLLMClient
 from components import render_sources, render_grounding
@@ -55,16 +56,25 @@ def init_pipeline():
     # 4. Loader
     loader = DocumentLoader()
 
-    # 5. Ingest pipeline
-    pipeline = IngestPipeline(loader, chunker, embedder, vector_store)
 
-    # 6. LLM client (Azure OpenAI)
+    # 5. LLM client (Azure OpenAI) — moved up; summarizer depends on it
     llm_client = AzureLLMClient(
         endpoint=settings.azure.endpoint,
         api_key=settings.azure.api_key,
         deployment=settings.azure.deployment,
         temperature=settings.llm.temperature,
         max_tokens=settings.llm.max_tokens,
+    )
+
+    # 6. Corpus summarizer (sidecar file lives next to the chroma store)
+    summarizer = CorpusSummarizer(
+        llm_client=llm_client,
+        persist_path=Path(persist_dir) / "_corpus_summary.txt",
+    )
+
+    # 7. Ingest pipeline (now with summarizer wired in)
+    pipeline = IngestPipeline(
+        loader, chunker, embedder, vector_store, summarizer=summarizer,
     )
 
     # 7. Query expander (uses same LLM client)
@@ -79,10 +89,12 @@ def init_pipeline():
         query_expander=query_expander,
     )
 
-    # 9. Query router (classifies incoming questions)
+    # Query router (corpus-aware: seeded from disk if a prior session
+    # already produced a summary; None otherwise)
     router = QueryRouter(
         llm_client=llm_client,
         examples=settings.routing.examples,
+        corpus_summary=summarizer.load(),
     )
 
     # 10. Multi-step chain (for complex MULTI_STEP queries)
@@ -135,6 +147,11 @@ def ingest_uploads(files):
         f"Done! Processed {result['files_processed']} file(s), "
         f"{result['total_chunks']} chunks indexed."
     )
+
+    # Push the fresh corpus summary onto the router so subsequent
+    # queries route with up-to-date corpus awareness.
+    if result.get("corpus_summary"):
+        st.session_state.router.corpus_summary = result["corpus_summary"]
 
 def render_sidebar():
     """Sidebar: file upload, ingestion trigger, and status."""

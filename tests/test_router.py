@@ -131,3 +131,45 @@ class TestQueryRouter:
         result = router.classify("Hello")
 
         assert result.route == QueryRoute.DIRECT
+
+class TestCorpusSummary:
+
+    def test_prompt_includes_corpus_summary_when_set(self):
+        llm = _make_mock_llm("DIRECT")
+        router = QueryRouter(
+            llm_client=llm,
+            examples=ROUTING_EXAMPLES,
+            corpus_summary="The documents cover Solstice Robotics' Series A funding.",
+        )
+        router.classify("test query")
+        prompt = llm.generate.call_args[0][0]
+        assert "</corpus_summary>" in prompt
+        assert "Solstice Robotics' Series A funding" in prompt
+
+    def test_prompt_omits_corpus_summary_when_none(self):
+        llm = _make_mock_llm("DIRECT")
+        router = QueryRouter(
+            llm_client=llm,
+            examples=ROUTING_EXAMPLES,
+            corpus_summary=None,
+        )
+        router.classify("test query")
+        prompt = llm.generate.call_args[0][0]
+        # The closing tag only appears when the block is rendered;
+        # the rules text references the opening tag by name on purpose.
+        assert "</corpus_summary>" not in prompt
+
+    def test_corpus_summary_is_mutable_attribute(self):
+        llm = _make_mock_llm("DIRECT")
+        router = QueryRouter(llm_client=llm, examples=ROUTING_EXAMPLES)
+
+        # Initially None → no rendered corpus block
+        router.classify("first query")
+        assert "</corpus_summary>" not in llm.generate.call_args[0][0]
+
+        # Update post-construction → corpus block renders on next call
+        router.corpus_summary = "Now we have a summary."
+        router.classify("second query")
+        second_prompt = llm.generate.call_args[0][0]
+        assert "</corpus_summary>" in second_prompt
+        assert "Now we have a summary." in second_prompt

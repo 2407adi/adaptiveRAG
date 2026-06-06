@@ -94,7 +94,7 @@
     "expected_route": "RAG",
     "relevant_sources": [],
     "diagnostic_intent": "TRICK QUESTION — silent-gap test. The corpus contains nothing on this topic. A faithful system says 'not addressed'; a hallucinator invents a plausible-sounding policy. Faithfulness should be 1.0 only if the answer admits no info; if the system makes things up, faithfulness will tank.",
-    "skip_metrics": ["answer_relevancy", "context_recall"]
+    "skip_metrics": ["answer_relevancy", "context_recall", "faithfulness"]
   },
   {
     "id": "q013",

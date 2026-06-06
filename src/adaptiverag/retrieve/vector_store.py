@@ -101,12 +101,15 @@ class ChromaStore(VectorStore):
     def add(self, chunks: list[StoredChunk]) -> None:
         if not chunks:
             return
-        self._collection.upsert(
-            ids=[c.id for c in chunks],
-            embeddings=[c.embedding for c in chunks],
-            documents=[c.text for c in chunks],
-            metadatas=[c.metadata or {} for c in chunks],
-        )
+        BATCH_SIZE = 5000  # Chroma caps upsert at 5461; safety margin
+        for i in range(0, len(chunks), BATCH_SIZE):
+            batch = chunks[i:i + BATCH_SIZE]
+            self._collection.upsert(
+                ids=[c.id for c in batch],
+                embeddings=[c.embedding for c in batch],
+                documents=[c.text for c in batch],
+                metadatas=[c.metadata or {} for c in batch],
+            )
 
     def search(
         self, query_vector: list[float], k: int = 5
