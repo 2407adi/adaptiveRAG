@@ -13,29 +13,27 @@ class RAGChain:
     """Takes a query, retrieves relevant chunks, and generates an answer with citations."""
 
     def __init__(self, vector_store: VectorStore, embedder: Embedder,
-                 llm_client, top_k: int = 5,
-                 query_expander: QueryExpander | None = None):
+                llm_client, top_k: int = 5,
+                query_expander: QueryExpander | None = None,
+                reranker=None, fetch_k: int = 20):
         self.vector_store = vector_store
         self.embedder = embedder
         self.llm_client = llm_client
         self.top_k = top_k
         self.query_expander = query_expander
+        self.reranker = reranker
+        self.fetch_k = fetch_k
 
     def query(self, question: str, expand: bool = False) -> dict:
-        """Run the full retrieve → format → generate cycle.
+        # How wide to cast stage-1's net: if a reranker is attached,
+        # fetch fetch_k candidates so it has a real shortlist to reorder.
+        # Otherwise fetch just top_k — behavior identical to before.
+        retrieve_k = self.fetch_k if self.reranker else self.top_k
 
-        Args:
-            question: The user's question.
-            expand:   If True and a QueryExpander is configured, run
-                      dual-search (original + expanded) and merge results.
-
-        Returns:
-            dict with 'answer' (str) and 'sources' (list of citation dicts)
-        """
         # 1. Retrieve — always search with the original query
         original_results: list[SearchResult] = self.vector_store.search_by_text(
             query_text=question,
-            k=self.top_k,
+            k=retrieve_k,
             embed_fn=self.embedder.embed,
         )
 
@@ -44,12 +42,17 @@ class RAGChain:
             expanded_query = self.query_expander.expand(question)
             expanded_results: list[SearchResult] = self.vector_store.search_by_text(
                 query_text=expanded_query,
-                k=self.top_k,
+                k=retrieve_k,
                 embed_fn=self.embedder.embed,
             )
-            results = self._merge_results(original_results, expanded_results)
+            results = self._merge_results(original_results, expanded_results, limit=retrieve_k)
         else:
             results = original_results
+
+        # 1c. Rerank — stage 2. Cross-encoder re-scores the wide net and
+        #     cuts it down to top_k. No-op if no reranker was injected.
+        if self.reranker:
+            results = self.reranker.rerank(question, results, top_n=self.top_k)
 
         # 2. Build prompt with retrieved context
         context = self._format_context(results)
@@ -89,7 +92,7 @@ class RAGChain:
         return "\n\n".join(blocks)
     
     def _merge_results(self, original: list[SearchResult],
-                       expanded: list[SearchResult]) -> list[SearchResult]:
+                       expanded: list[SearchResult], limit=None) -> list[SearchResult]:
         """Merge two result sets, keeping the higher score for duplicates."""
         best: dict[str, SearchResult] = {}
 
@@ -101,7 +104,8 @@ class RAGChain:
                 best[r.chunk_id] = r
 
         merged = sorted(best.values(), key=lambda r: r.score, reverse=True)
-        return merged[:self.top_k]
+        limit = limit if limit is not None else self.top_k
+        return merged[:limit]
     
     def _build_prompt(self, question: str, context: str) -> str:
         """Build the final prompt sent to the LLM."""

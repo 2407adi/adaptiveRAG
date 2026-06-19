@@ -29,6 +29,8 @@ from ..reason.chain import RAGChain, MultiStepChain
 from ..reason.grounding import GroundingValidator
 import time
 from datetime import datetime, timezone
+from adaptiverag.retrieve.reranker import build_reranker_from_settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -612,12 +614,16 @@ if __name__ == "__main__":
 
     query_expander = QueryExpander(llm_client)
 
+    reranker = build_reranker_from_settings(settings.retrieval.rerank)
+    
     rag_chain = RAGChain(
         vector_store=vector_store,
         embedder=embedder,
         llm_client=llm_client,
         top_k=settings.retrieval.top_k,
         query_expander=query_expander,
+        reranker=reranker,
+        fetch_k=settings.retrieval.rerank.fetch_k,
     )
 
     router = QueryRouter(

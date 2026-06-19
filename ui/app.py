@@ -29,6 +29,8 @@ from components import render_sources, render_grounding
 
 from adaptiverag.reason.grounding import GroundingValidator
 
+from adaptiverag.retrieve.reranker import build_reranker_from_settings
+
 
 def init_pipeline():
     """Initialize all RAG components once, store in session state."""
@@ -80,6 +82,9 @@ def init_pipeline():
     # 7. Query expander (uses same LLM client)
     query_expander = QueryExpander(llm_client)
 
+    # 7b. Reranker (None if disabled in config)
+    reranker = build_reranker_from_settings(settings.retrieval.rerank)
+
     # 8. RAG chain
     rag_chain = RAGChain(
         vector_store=vector_store,
@@ -87,6 +92,8 @@ def init_pipeline():
         llm_client=llm_client,
         top_k=settings.retrieval.top_k,
         query_expander=query_expander,
+        reranker=reranker,
+        fetch_k=settings.retrieval.rerank.fetch_k,
     )
 
     # Query router (corpus-aware: seeded from disk if a prior session

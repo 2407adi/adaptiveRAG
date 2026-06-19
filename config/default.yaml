@@ -30,6 +30,11 @@ retrieval:
     rrf_k: 60
     weight_dense: 1.0
     weight_sparse: 1.0
+  rerank:
+    enabled: true
+    backend: "cross_encoder"     # "cross_encoder" (local) or "cohere"
+    model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    fetch_k: 20                  # wide net for stage 1; top_k survives stage 2
 
 # ── Routing ───────────────────────────────────────
 routing:

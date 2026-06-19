@@ -63,19 +63,31 @@ class HybridConfig:
     weight_dense: float = 1.0
     weight_sparse: float = 1.0
 
+@dataclass
+class RerankConfig:
+    enabled: bool = False
+    backend: str = "cross_encoder"
+    model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    fetch_k: int = 20
 
 @dataclass
 class RetrievalConfig:
     top_k: int = 5
     score_threshold: float = 0.7
     mode: str = "hybrid"
-    hybrid: Optional[HybridConfig] = None
+    hybrid: HybridConfig = field(default_factory=HybridConfig)
+    rerank: RerankConfig = field(default_factory=RerankConfig)
 
     def __post_init__(self):
         if self.hybrid is None:
             self.hybrid = HybridConfig()
         elif isinstance(self.hybrid, dict):
             self.hybrid = HybridConfig(**self.hybrid)
+
+        if self.rerank is None:
+            self.rerank = RerankConfig()
+        elif isinstance(self.rerank, dict):
+            self.rerank = RerankConfig(**self.rerank)
 
 
 @dataclass
