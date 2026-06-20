@@ -6,6 +6,7 @@ from .embedder import Embedder
 from .models import Document
 from ..retrieve.vector_store import VectorStore, StoredChunk
 from .summarizer import CorpusSummarizer
+from ..retrieve.hybrid import BM25Retriever
 
 
 class IngestPipeline:
@@ -18,12 +19,14 @@ class IngestPipeline:
         embedder: Embedder,
         vector_store: VectorStore,
         summarizer: CorpusSummarizer | None = None,
+        bm25: BM25Retriever | None = None,
     ):
         self.loader = loader
         self.chunker = chunker
         self.embedder = embedder
         self.vector_store = vector_store
         self.summarizer = summarizer
+        self.bm25 = bm25       # None → dense-only pipeline, no keyword index
 
     def ingest(self, source_path: str) -> dict:
         """Process all documents in a directory and index them."""
@@ -58,6 +61,12 @@ class IngestPipeline:
 
         # Store everything in one batch
         self.vector_store.add(all_vector_chunks)
+
+        # Keep the keyword (BM25) index in lockstep with the dense store,
+        # so a HybridRetriever sharing this same bm25 instance sees the
+        # newly ingested chunks immediately.
+        if self.bm25 is not None:
+            self.bm25.add(all_vector_chunks)
 
         corpus_summary: str | None = None
         if self.summarizer is not None and documents:

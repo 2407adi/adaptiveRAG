@@ -15,7 +15,8 @@ class RAGChain:
     def __init__(self, vector_store: VectorStore, embedder: Embedder,
                 llm_client, top_k: int = 5,
                 query_expander: QueryExpander | None = None,
-                reranker=None, fetch_k: int = 20):
+                reranker=None, fetch_k: int = 20,
+                hybrid_retriever=None):
         self.vector_store = vector_store
         self.embedder = embedder
         self.llm_client = llm_client
@@ -23,57 +24,69 @@ class RAGChain:
         self.query_expander = query_expander
         self.reranker = reranker
         self.fetch_k = fetch_k
+        self.hybrid_retriever = hybrid_retriever   # None → dense-only
 
-    def query(self, question: str, expand: bool = False) -> dict:
-        # How wide to cast stage-1's net: if a reranker is attached,
-        # fetch fetch_k candidates so it has a real shortlist to reorder.
-        # Otherwise fetch just top_k — behavior identical to before.
-        retrieve_k = self.fetch_k if self.reranker else self.top_k
 
-        # 1. Retrieve — always search with the original query
-        original_results: list[SearchResult] = self.vector_store.search_by_text(
-            query_text=question,
-            k=retrieve_k,
-            embed_fn=self.embedder.embed,
+    def _search(self, query: str, k: int) -> list[SearchResult]:
+        """One retrieval call: hybrid if a HybridRetriever was injected,
+        else dense-only. Keeps retrieve() agnostic to which is active —
+        the factory picks based on settings.retrieval.mode.
+        """
+        if self.hybrid_retriever is not None:
+            return self.hybrid_retriever.search(query, k=k)
+        return self.vector_store.search_by_text(
+            query_text=query, k=k, embed_fn=self.embedder.embed,
         )
 
-        # 1b. If expansion is on, also search with the rewritten query
+    def retrieve(self, question: str, expand: bool = False) -> list[SearchResult]:
+        """Retrieve the chunks for a question — no LLM, no answer.
+
+        This is the whole evidence-gathering half of the pipeline:
+        dense search → optional expansion-merge → optional rerank.
+        query() calls this; the agent's search_documents tool will too.
+        """
+        # How wide to cast stage-1's net: if a reranker is attached,
+        # fetch fetch_k candidates so it has a real shortlist to reorder.
+        retrieve_k = self.fetch_k if self.reranker else self.top_k
+
+        # 1. Always search with the original query
+        original_results: list[SearchResult] = self._search(question, retrieve_k)
+
+        # 1b. If expansion is on, also search with the rewritten query and merge
         if expand and self.query_expander:
             expanded_query = self.query_expander.expand(question)
-            expanded_results: list[SearchResult] = self.vector_store.search_by_text(
-                query_text=expanded_query,
-                k=retrieve_k,
-                embed_fn=self.embedder.embed,
-            )
+            expanded_results: list[SearchResult] = self._search(expanded_query, retrieve_k)
             results = self._merge_results(original_results, expanded_results, limit=retrieve_k)
         else:
             results = original_results
 
-        # 1c. Rerank — stage 2. Cross-encoder re-scores the wide net and
-        #     cuts it down to top_k. No-op if no reranker was injected.
+        # 1c. Rerank — cross-encoder re-scores the wide net, cuts to top_k.
         if self.reranker:
             results = self.reranker.rerank(question, results, top_n=self.top_k)
 
-        # 2. Build prompt with retrieved context
+        return results
+
+    def query(self, question: str, expand: bool = False) -> dict:
+        # Evidence half — extracted so the agent can reuse it.
+        results = self.retrieve(question, expand=expand)
+
+        # Generation half — format → prompt → LLM → package sources.
         context = self._format_context(results)
         prompt = self._build_prompt(question, context)
-
-        # 3. Call the LLM
         answer = self.llm_client.generate(prompt)
 
-        # 4. Package sources for citations
         sources = [
-                    {
-                        "chunk_id": r.chunk_id,
-                        "source": Path(r.metadata.get("source", "unknown")).name,
-                        "page": r.metadata.get("page", ""),
-                        "chunk_index": r.metadata.get("chunk_index", "unknown"),
-                        "score": round(r.score, 4),
-                        "text_preview": r.text[:200],
-                        "full_text": r.text,
-                    }
-                    for r in results
-                ]
+            {
+                "chunk_id": r.chunk_id,
+                "source": Path(r.metadata.get("source", "unknown")).name,
+                "page": r.metadata.get("page", ""),
+                "chunk_index": r.metadata.get("chunk_index", "unknown"),
+                "score": round(r.score, 4),
+                "text_preview": r.text[:200],
+                "full_text": r.text,
+            }
+            for r in results
+        ]
         return {"answer": answer, "sources": sources}
     
     def _format_context(self, results: list[SearchResult]) -> str:

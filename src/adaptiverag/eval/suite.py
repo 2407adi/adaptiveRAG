@@ -29,7 +29,7 @@ from ..reason.chain import RAGChain, MultiStepChain
 from ..reason.grounding import GroundingValidator
 import time
 from datetime import datetime, timezone
-from adaptiverag.retrieve.reranker import build_reranker_from_settings
+
 
 
 logger = logging.getLogger(__name__)
@@ -537,24 +537,13 @@ class EvalSuite:
 # ────────────────────────────────────────────────────────────────────
 # CLI entry point — `python -m adaptiverag.eval.suite [sample_id ...]`
 # ────────────────────────────────────────────────────────────────────
-# NOTE: pipeline wiring below duplicates init_pipeline() from ui/app.py.
-# A shared wire_pipeline() factory belongs to the upcoming UI rewrite
-# block (per pre-deploy blockers in CLAUDE.md), not here.
+
 
 if __name__ == "__main__":
     import sys
 
-    # Lazy imports — only needed when this file is run as a script,
-    # not when EvalSuite is imported from elsewhere.
     from adaptiverag.config import settings
-    from adaptiverag.ingest.embedder import create_embedder
-    from adaptiverag.ingest.chunker import RecursiveChunker
-    from adaptiverag.ingest.loader import DocumentLoader
-    from adaptiverag.ingest.pipeline import IngestPipeline
-    from adaptiverag.retrieve.vector_store import create_vector_store
-    from adaptiverag.retrieve.query_expander import QueryExpander
-    from adaptiverag.llm_client import AzureLLMClient
-    from adaptiverag.ingest.summarizer import CorpusSummarizer
+    from adaptiverag.pipeline import wire_pipeline
 
     logging.basicConfig(
         level=logging.INFO,
@@ -564,45 +553,18 @@ if __name__ == "__main__":
     # Project root: src/adaptiverag/eval/suite.py → ../../../..
     PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
-    # ── Embedder (shared with the live app: same model, same vectors) ──
-    embedder = create_embedder("local", model_name="all-MiniLM-L6-v2")
-
-    # ── Vector store: dedicated eval collection, hermetic ──
-    persist_dir = PROJECT_ROOT / "data" / "chroma_eval"
-    vector_store = create_vector_store(
-        backend="chroma",
+    # ── Build the whole pipeline from the single factory ──
+    bundle = wire_pipeline(
+        settings,
         collection_name="eval_collection",
-        persist_directory=str(persist_dir),
+        persist_directory=PROJECT_ROOT / "data" / "chroma_eval",
     )
 
-    # ── LLM client (built early — summarizer + chains both need it) ──
-    llm_client = AzureLLMClient(
-        endpoint=settings.azure.endpoint,
-        api_key=settings.azure.api_key,
-        deployment=settings.azure.deployment,
-        temperature=settings.llm.temperature,
-        max_tokens=settings.llm.max_tokens,
-    )
-
-    # ── Corpus summarizer (sidecar next to the eval chroma store) ──
-    summarizer = CorpusSummarizer(
-        llm_client=llm_client,
-        persist_path=persist_dir / "_corpus_summary.txt",
-    )
-
-    # Auto-ingest the eval corpus on first run (or if the dir is wiped)
-    if vector_store.count() == 0:
+    # ── Auto-ingest the eval corpus on first run (or if the dir is wiped) ──
+    if bundle.vector_store.count() == 0:
         logger.info("Eval vector store is empty — ingesting corpus...")
-        chunker = RecursiveChunker(
-            chunk_size=settings.chunking.chunk_size,
-            chunk_overlap=settings.chunking.chunk_overlap,
-        )
-        loader = DocumentLoader()
-        ingest_pipeline = IngestPipeline(
-            loader, chunker, embedder, vector_store, summarizer=summarizer,
-        )
         corpus_dir = PROJECT_ROOT / "data" / "eval" / "corpus"
-        result = ingest_pipeline.ingest(str(corpus_dir))
+        result = bundle.ingest.ingest(str(corpus_dir))
         logger.info(
             "Ingested %d files, %d chunks",
             result["files_processed"], result["total_chunks"],
@@ -611,47 +573,20 @@ if __name__ == "__main__":
             "Corpus summary: %s",
             "generated" if result.get("corpus_summary") else "skipped/failed",
         )
-
-    query_expander = QueryExpander(llm_client)
-
-    reranker = build_reranker_from_settings(settings.retrieval.rerank)
-    
-    rag_chain = RAGChain(
-        vector_store=vector_store,
-        embedder=embedder,
-        llm_client=llm_client,
-        top_k=settings.retrieval.top_k,
-        query_expander=query_expander,
-        reranker=reranker,
-        fetch_k=settings.retrieval.rerank.fetch_k,
-    )
-
-    router = QueryRouter(
-        llm_client=llm_client,
-        examples=settings.routing.examples,
-        corpus_summary=summarizer.load(),
-    )
-
-    multi_step_chain = MultiStepChain(
-        rag_chain=rag_chain,
-        llm_client=llm_client,
-        max_sub_questions=4,
-    )
-
-    validator = GroundingValidator(
-        llm_client=llm_client,
-        threshold=0.6,
-    )
+        # Push the fresh summary onto the router so this very run routes
+        # with corpus awareness (mirrors ingest_uploads in app.py).
+        if result.get("corpus_summary"):
+            bundle.router.corpus_summary = result["corpus_summary"]
 
     # ── Suite + run ──
     suite = EvalSuite(
         dataset_path=PROJECT_ROOT / "data" / "eval" / "qa_pairs.json",
-        router=router,
-        rag_chain=rag_chain,
-        multi_step_chain=multi_step_chain,
-        llm_client=llm_client,
-        embedder=embedder,
-        validator=validator,
+        router=bundle.router,
+        rag_chain=bundle.rag_chain,
+        multi_step_chain=bundle.multi_step_chain,
+        llm_client=bundle.llm_client,
+        embedder=bundle.embedder,
+        validator=bundle.grounding_validator,
         results_dir=PROJECT_ROOT / "eval_results",
     )
 

@@ -71,6 +71,16 @@ class VectorStore(ABC):
         """Number of indexed chunks."""
         ...
 
+    @abstractmethod
+    def get_all(self) -> list[StoredChunk]:
+        """Return every stored chunk (id, text, metadata; embeddings optional).
+
+        Used to rebuild a derived index (e.g. BM25) from the persisted
+        store. Backends keep their own materialized copy of the text, so
+        this is a local read, no re-embedding.
+        """
+        ...
+
 
 """ChromaStore — append this to vector_store.py"""
 
@@ -139,6 +149,29 @@ class ChromaStore(VectorStore):
                 )
             )
         return search_results
+
+    def get_all(self) -> list[StoredChunk]:
+        """Return every stored chunk's id, text, and metadata.
+
+        Embeddings are omitted (returned empty) — the only caller is the
+        BM25 rebuild, which scores on text alone. Chroma persists across
+        restarts but the in-memory BM25 index does not, so we reconstruct
+        BM25 from here at wire time.
+        """
+        data = self._collection.get(include=["documents", "metadatas"])
+        ids = data["ids"]
+        documents = data["documents"] or []
+        metadatas = data["metadatas"] or []
+
+        return [
+            StoredChunk(
+                id=chunk_id,
+                text=documents[i],
+                embedding=[],                 # not needed for keyword search
+                metadata=dict(metadatas[i] or {}),
+            )
+            for i, chunk_id in enumerate(ids)
+        ]
 
     def delete(self, ids: list[str]) -> None:
         if ids:
@@ -247,6 +280,18 @@ class FAISSStore(VectorStore):
                 )
             )
         return results
+    
+    def get_all(self) -> list[StoredChunk]:
+        """Return every stored chunk's id, text, and metadata (no vectors)."""
+        return [
+            StoredChunk(
+                id=str_id,
+                text=text,
+                embedding=[],
+                metadata=self._metadatas.get(str_id, {}),
+            )
+            for str_id, text in self._documents.items()
+        ]
 
     def delete(self, ids: list[str]) -> None:
         int_ids = []

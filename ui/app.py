@@ -14,121 +14,38 @@ import tempfile
 import os
 
 from adaptiverag.config import settings
-from adaptiverag.ingest.loader import DocumentLoader
-from adaptiverag.ingest.chunker import RecursiveChunker
-from adaptiverag.ingest.embedder import create_embedder
-from adaptiverag.ingest.pipeline import IngestPipeline
-from adaptiverag.retrieve.vector_store import create_vector_store
-from adaptiverag.reason.chain import RAGChain, MultiStepChain
-from adaptiverag.retrieve.query_expander import QueryExpander
-from adaptiverag.reason.router import QueryRouter, QueryRoute
-from adaptiverag.ingest.summarizer import CorpusSummarizer
-
-from adaptiverag.llm_client import AzureLLMClient
+from adaptiverag.reason.router import QueryRoute
 from components import render_sources, render_grounding
 
-from adaptiverag.reason.grounding import GroundingValidator
 
-from adaptiverag.retrieve.reranker import build_reranker_from_settings
+from adaptiverag.pipeline import wire_pipeline
 
 
 def init_pipeline():
     """Initialize all RAG components once, store in session state."""
-
     if "initialized" in st.session_state:
         return  # already done — skip on re-runs
 
-    # 1. Embedder (local sentence-transformers, no API key needed)
-    embedder = create_embedder("local", model_name="all-MiniLM-L6-v2")
-
-    # 2. Vector store (Chroma, persistent so docs survive re-runs)
-    persist_dir = str(PROJECT_ROOT / "data" / "chroma_store")
-    vector_store = create_vector_store(
-        backend="chroma",
+    bundle = wire_pipeline(
+        settings,
         collection_name="streamlit_docs",
-        persist_directory=persist_dir,
+        persist_directory=PROJECT_ROOT / "data" / "chroma_store",
     )
 
-    # 3. Chunker (recursive, from your config defaults)
-    chunker = RecursiveChunker(
-        chunk_size=settings.chunking.chunk_size,
-        chunk_overlap=settings.chunking.chunk_overlap,
-    )
+    # ── Stash the wired components in session state ──
+    st.session_state.embedder = bundle.embedder
+    st.session_state.vector_store = bundle.vector_store
+    st.session_state.pipeline = bundle.ingest          # ingest pipeline
+    st.session_state.rag_chain = bundle.rag_chain
+    st.session_state.router = bundle.router
+    st.session_state.multi_step_chain = bundle.multi_step_chain
+    st.session_state.llm_client = bundle.llm_client
+    st.session_state.grounding_validator = bundle.grounding_validator
 
-    # 4. Loader
-    loader = DocumentLoader()
-
-
-    # 5. LLM client (Azure OpenAI) — moved up; summarizer depends on it
-    llm_client = AzureLLMClient(
-        endpoint=settings.azure.endpoint,
-        api_key=settings.azure.api_key,
-        deployment=settings.azure.deployment,
-        temperature=settings.llm.temperature,
-        max_tokens=settings.llm.max_tokens,
-    )
-
-    # 6. Corpus summarizer (sidecar file lives next to the chroma store)
-    summarizer = CorpusSummarizer(
-        llm_client=llm_client,
-        persist_path=Path(persist_dir) / "_corpus_summary.txt",
-    )
-
-    # 7. Ingest pipeline (now with summarizer wired in)
-    pipeline = IngestPipeline(
-        loader, chunker, embedder, vector_store, summarizer=summarizer,
-    )
-
-    # 7. Query expander (uses same LLM client)
-    query_expander = QueryExpander(llm_client)
-
-    # 7b. Reranker (None if disabled in config)
-    reranker = build_reranker_from_settings(settings.retrieval.rerank)
-
-    # 8. RAG chain
-    rag_chain = RAGChain(
-        vector_store=vector_store,
-        embedder=embedder,
-        llm_client=llm_client,
-        top_k=settings.retrieval.top_k,
-        query_expander=query_expander,
-        reranker=reranker,
-        fetch_k=settings.retrieval.rerank.fetch_k,
-    )
-
-    # Query router (corpus-aware: seeded from disk if a prior session
-    # already produced a summary; None otherwise)
-    router = QueryRouter(
-        llm_client=llm_client,
-        examples=settings.routing.examples,
-        corpus_summary=summarizer.load(),
-    )
-
-    # 10. Multi-step chain (for complex MULTI_STEP queries)
-    multi_step_chain = MultiStepChain(
-        rag_chain=rag_chain,
-        llm_client=llm_client,
-        max_sub_questions=4,
-    )
-
-    # 11. Grounding validator (hallucination detection)
-    grounding_validator = GroundingValidator(
-        llm_client=llm_client,
-        threshold=0.6,
-    )
-
-    # ── Stash everything in session state ──
-    st.session_state.embedder = embedder
-    st.session_state.vector_store = vector_store
-    st.session_state.pipeline = pipeline
-    st.session_state.rag_chain = rag_chain
-    st.session_state.messages = []        # chat history
+    # ── UI-only state (not part of the pipeline) ──
+    st.session_state.messages = []          # chat history
     st.session_state.ingested_files = set()  # track what's been uploaded
     st.session_state.initialized = True
-    st.session_state.router = router
-    st.session_state.multi_step_chain = multi_step_chain
-    st.session_state.llm_client = llm_client
-    st.session_state.grounding_validator = grounding_validator
 
 def ingest_uploads(files):
     """Save uploaded files to static/uploads/, then run the ingest pipeline."""
