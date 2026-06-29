@@ -19,6 +19,7 @@ from components import render_sources, render_grounding
 
 
 from adaptiverag.pipeline import wire_pipeline
+from adaptiverag.agents.tools import build_default_registry
 
 
 def init_pipeline():
@@ -37,6 +38,11 @@ def init_pipeline():
     st.session_state.vector_store = bundle.vector_store
     st.session_state.pipeline = bundle.ingest          # ingest pipeline
     st.session_state.rag_chain = bundle.rag_chain
+    st.session_state.tool_registry = build_default_registry(   # ← add this
+    bundle.rag_chain,
+    settings.tools,
+    hmac_key=os.getenv("AUDIT_HMAC_KEY"),
+    tavily_api_key=os.getenv("TAVILY_API_KEY"), )
     st.session_state.router = bundle.router
     st.session_state.multi_step_chain = bundle.multi_step_chain
     st.session_state.llm_client = bundle.llm_client

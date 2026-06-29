@@ -105,6 +105,40 @@ class RoutingConfig:
         if self.examples is None:
             self.examples = []
 
+@dataclass
+class SandboxConfig:
+    timeout: float = 5.0        # wall-clock seconds before the locked room is evicted
+    cpu_seconds: int = 2        # CPU-time cap the building manager (OS) enforces
+    max_memory_mb: int = 256    # the room's whiteboard (memory) cap, in megabytes
+
+
+@dataclass
+class TavilyConfig:
+    enabled: bool = True        # whether to offer web_search (it still degrades safely without a key)
+    max_results: int = 3        # how many web snippets the researcher returns
+
+
+@dataclass
+class AuditConfig:
+    path: str = "data/audit/tool_calls.jsonl"   # where the tamper-evident logbook file is written
+
+
+@dataclass
+class ToolsConfig:
+    sandbox: SandboxConfig = field(default_factory=SandboxConfig)   # house rules for the locked room
+    tavily: TavilyConfig = field(default_factory=TavilyConfig)      # house rules for the web researcher
+    audit: AuditConfig = field(default_factory=AuditConfig)         # where the logbook lives
+
+    def __post_init__(self):
+        # YAML hands nested blocks over as plain dicts; coerce each into its
+        # dataclass — the SAME trick RetrievalConfig uses for hybrid/rerank.
+        if isinstance(self.sandbox, dict):
+            self.sandbox = SandboxConfig(**self.sandbox)
+        if isinstance(self.tavily, dict):
+            self.tavily = TavilyConfig(**self.tavily)
+        if isinstance(self.audit, dict):
+            self.audit = AuditConfig(**self.audit)
+
 
 @dataclass
 class Settings:
@@ -115,6 +149,7 @@ class Settings:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     azure: AzureConfig = field(default_factory=AzureConfig)
     routing: RoutingConfig = field(default_factory=RoutingConfig)
+    tools: ToolsConfig = field(default_factory=ToolsConfig)
 
 
 def load_settings() -> Settings:
@@ -139,6 +174,7 @@ def load_settings() -> Settings:
             deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", ""),
         ),
         routing=RoutingConfig(**cfg.get("routing", {})),
+        tools=ToolsConfig(**cfg.get("tools", {})),
     )
 
 

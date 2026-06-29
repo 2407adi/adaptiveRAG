@@ -85,3 +85,15 @@ routing:
 # ── Reasoning ─────────────────────────────────────
 reasoning:
   max_sub_questions: 4
+
+# ── Agent Tools ───────────────────────────────────
+tools:
+  sandbox:
+    timeout: 5.0          # wall-clock seconds before the locked room is evicted
+    cpu_seconds: 2        # CPU-time cap the OS enforces (catches infinite loops)
+    max_memory_mb: 256    # the room's memory cap, in MB (catches memory bombs)
+  tavily:
+    enabled: true         # offer web_search (still degrades safely with no key)
+    max_results: 3        # how many web snippets to return
+  audit:
+    path: "data/audit/tool_calls.jsonl"   # the tamper-evident logbook file
