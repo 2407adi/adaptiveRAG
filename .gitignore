@@ -13,3 +13,4 @@ src/adaptiverag.egg-info/
 data/chroma_store/
 ui/static/uploads/
 data/chroma_eval/
+data/audit/
