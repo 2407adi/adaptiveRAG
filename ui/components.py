@@ -1,5 +1,7 @@
 """Reusable UI components for AdaptiveRAG chat."""
 
+import json
+
 import streamlit as st
 
 
@@ -72,3 +74,33 @@ def render_grounding(grounding):
             else:
                 st.markdown(f"⚠️ {v.claim}")
                 st.caption("Not found in the source documents")
+
+
+def render_agent_trace(trace, expanded=False):
+    """Show the agent's Thought → Action → Observation trail in an expander.
+
+    `trace` is the executor's scratchpad: a list of tagged dicts, each one of
+    {"type": "thought"|"action"|"observation", ...}. This is the persisted
+    "Thought Process" panel — it survives Streamlit reruns because it's stored
+    on the chat message, not rebuilt from a transient expander.
+    """
+    if not trace:
+        return
+
+    with st.expander("🧠 Thought Process", expanded=expanded):
+        for entry in trace:
+            kind = entry.get("type")
+            if kind == "thought":
+                st.markdown(f"💭 **Thought:** {entry.get('content', '')}")
+            elif kind == "action":
+                st.markdown(f"🔧 **Action:** `{entry.get('tool', '')}`")
+                args = entry.get("args") or {}
+                if args:
+                    st.code(json.dumps(args, indent=2), language="json")
+            elif kind == "observation":
+                content = entry.get("content", "")
+                if len(content) > 1500:                       # keep long tool output readable
+                    content = content[:1500] + " …"
+                st.markdown("👁️ **Observation:**")
+                st.caption(content)
+            st.divider()

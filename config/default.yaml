@@ -97,3 +97,10 @@ tools:
     max_results: 3        # how many web snippets to return
   audit:
     path: "data/audit/tool_calls.jsonl"   # the tamper-evident logbook file
+
+# ── Agent (ReAct executor) ────────────────────────
+agent:
+  max_iterations: 6                 # move budget — the detective stops after this many tool calls
+  require_approval:                 # tools that need the supervisor's warrant (interrupt) before running
+    - run_python
+    - web_search

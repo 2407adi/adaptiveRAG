@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import os
 
 from .config import Settings
 from .ingest.loader import DocumentLoader
@@ -25,6 +26,8 @@ from .reason.grounding import GroundingValidator
 from .llm_client import AzureLLMClient
 from .retrieve.hybrid import BM25Retriever, HybridRetriever
 
+from .agents.tools import build_default_registry, ToolRegistry
+from .agents.executor import AgentExecutor
 
 @dataclass
 class Pipeline:
@@ -43,6 +46,8 @@ class Pipeline:
     multi_step_chain: MultiStepChain
     router: QueryRouter
     grounding_validator: GroundingValidator
+    tool_registry: ToolRegistry | None = None      # Block 3.1 front desk (shared + audited)
+    agent_executor: AgentExecutor | None = None    # Block 3.2 ReAct detective
 
 
 def wire_pipeline(
@@ -149,6 +154,22 @@ def wire_pipeline(
     # 10. Grounding validator (hallucination detection)
     grounding_validator = GroundingValidator(llm_client=llm_client, threshold=0.6)
 
+    # Wiring agents pipeline
+    hmac_key = os.getenv("AUDIT_HMAC_KEY")
+    tool_registry = None
+    agent_executor = None
+    if hmac_key:
+        tool_registry = build_default_registry(
+            rag_chain, settings.tools,
+            hmac_key=hmac_key,
+            tavily_api_key=os.getenv("TAVILY_API_KEY"),
+        )
+        agent_executor = AgentExecutor(
+            llm_client, tool_registry,
+            max_iterations=settings.agent.max_iterations,
+            require_approval=settings.agent.require_approval,
+        )
+
     return Pipeline(
         embedder=embedder,
         vector_store=vector_store,
@@ -159,4 +180,6 @@ def wire_pipeline(
         multi_step_chain=multi_step_chain,
         router=router,
         grounding_validator=grounding_validator,
+        tool_registry=tool_registry,
+        agent_executor=agent_executor,
     )

@@ -10,16 +10,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 import streamlit as st
-import tempfile
-import os
+import json
 
 from adaptiverag.config import settings
 from adaptiverag.reason.router import QueryRoute
-from components import render_sources, render_grounding
+from components import render_sources, render_grounding, render_agent_trace
 
 
 from adaptiverag.pipeline import wire_pipeline
-from adaptiverag.agents.tools import build_default_registry
 
 
 def init_pipeline():
@@ -38,11 +36,8 @@ def init_pipeline():
     st.session_state.vector_store = bundle.vector_store
     st.session_state.pipeline = bundle.ingest          # ingest pipeline
     st.session_state.rag_chain = bundle.rag_chain
-    st.session_state.tool_registry = build_default_registry(   # ← add this
-    bundle.rag_chain,
-    settings.tools,
-    hmac_key=os.getenv("AUDIT_HMAC_KEY"),
-    tavily_api_key=os.getenv("TAVILY_API_KEY"), )
+    st.session_state.tool_registry = bundle.tool_registry     # Block 3.1 (shared, from wire_pipeline)
+    st.session_state.agent_executor = bundle.agent_executor   # Block 3.2 ReAct detective
     st.session_state.router = bundle.router
     st.session_state.multi_step_chain = bundle.multi_step_chain
     st.session_state.llm_client = bundle.llm_client
@@ -51,6 +46,8 @@ def init_pipeline():
     # ── UI-only state (not part of the pipeline) ──
     st.session_state.messages = []          # chat history
     st.session_state.ingested_files = set()  # track what's been uploaded
+    st.session_state.mode = "Chat (RAG)"    # which flow the chat box drives
+    st.session_state.agent_pending = None   # a tool awaiting approval (thread_id + request)
     st.session_state.initialized = True
 
 def ingest_uploads(files):
@@ -126,32 +123,90 @@ def render_sidebar():
                  "results for vague or short queries.",
         )
 
-def render_chat():
-    """Main chat area: display history, handle new input."""
+        # ── Mode: RAG chat vs the ReAct agent ──
+        st.divider()
+        st.subheader("Mode")
+        st.session_state.mode = st.radio(
+            "How should the chat box behave?",
+            ["Chat (RAG)", "Agent (ReAct)"],
+            index=0 if st.session_state.get("mode", "Chat (RAG)").startswith("Chat") else 1,
+            help="Chat routes through the RAG / reasoning pipeline. Agent runs the "
+                 "ReAct tool-using loop and pauses for your approval before "
+                 "side-effecting tools (run_python, web_search).",
+        )
+        if st.session_state.get("agent_executor") is None:
+            st.caption("⚠️ Agent needs AUDIT_HMAC_KEY in .env")
 
-    st.title("AdaptiveRAG Chat")
+def _handle_agent_result(result):
+    """Fold an executor result into session state: pause for approval, or finish."""
+    if result["status"] == "awaiting_approval":
+        st.session_state.agent_pending = result           # stash thread_id + request + partial trace
+    else:                                                  # "done"
+        st.session_state.agent_pending = None
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": result.get("answer") or "(no answer)",
+            "trace": result.get("trace", []),
+            "mode": "agent",
+        })
 
-    # ── Render conversation history ──
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            if msg.get("sources"):
-                render_sources(msg["sources"])
-            if msg.get("grounding"):
-                render_grounding(msg["grounding"])
 
-    # ── Handle new user input ──
+def render_approval_gate():
+    """The warrant desk, in the UI: show the proposed tool + Approve / Reject."""
+    pending = st.session_state.agent_pending
+    req = pending["request"]
+
+    with st.chat_message("assistant"):
+        st.warning("⏸️ **Approval needed** — the agent wants to run a side-effecting tool.")
+        st.markdown(f"**Tool:** `{req['tool']}`")
+        if req.get("args"):
+            st.code(json.dumps(req["args"], indent=2), language="json")
+        render_agent_trace(pending.get("trace", []), expanded=True)
+
+        reason = st.text_input("Reason (optional)", key="approval_reason")
+        c1, c2, _ = st.columns([1, 1, 4])
+        approve = c1.button("✅ Approve", key="approve_btn", type="primary")
+        reject = c2.button("❌ Reject", key="reject_btn")
+
+    if approve or reject:
+        decision = {"approved": bool(approve), "reason": reason.strip()}
+        with st.spinner("Resuming agent…"):
+            result = st.session_state.agent_executor.resume(pending["thread_id"], decision)
+        _handle_agent_result(result)
+        st.rerun()
+
+
+def handle_agent_input():
+    """Agent mode: drive start() / resume() with the approval gate in between."""
+    ex = st.session_state.get("agent_executor")
+    if ex is None:
+        st.error("Agent unavailable — set AUDIT_HMAC_KEY in your .env and restart.")
+        return
+
+    # A tool is waiting on the user → show the gate; block new input meanwhile.
+    if st.session_state.get("agent_pending"):
+        render_approval_gate()
+
+    if user_input := st.chat_input(
+        "Ask the agent to research, compute, or compare…",
+        disabled=bool(st.session_state.get("agent_pending")),
+    ):
+        st.session_state.messages.append({"role": "user", "content": user_input})
+        with st.spinner("🕵️ Agent working — thinking and using tools…"):
+            result = ex.start(user_input)
+        _handle_agent_result(result)
+        st.rerun()
+
+
+def handle_rag_input():
+    """Chat mode: the original router → direct / RAG / multi-step flow."""
     if user_input := st.chat_input("Ask a question about your documents..."):
-        # 1. Show the user's message immediately
         with st.chat_message("user"):
             st.markdown(user_input)
         st.session_state.messages.append({
-            "role": "user",
-            "content": user_input,
-            "sources": [],
+            "role": "user", "content": user_input, "sources": [],
         })
 
-        # 2. Route and generate response
         with st.chat_message("assistant"):
             with st.spinner("Classifying question..."):
                 route_result = st.session_state.router.classify(user_input)
@@ -168,8 +223,6 @@ def render_chat():
                     response = st.session_state.multi_step_chain.query(
                         user_input, expand=expand,
                     )
-
-                # Show the reasoning trace
                 if response.get("reasoning_steps"):
                     with st.expander("🧠 Reasoning Steps", expanded=False):
                         for i, step in enumerate(response["reasoning_steps"], 1):
@@ -199,6 +252,30 @@ def render_chat():
             "sources": response["sources"],
             "grounding": response.get("grounding"),
         })
+
+
+def render_chat():
+    """Main chat area: history + mode-specific input handling."""
+    mode = st.session_state.get("mode", "Chat (RAG)")
+    is_agent = mode.startswith("Agent")
+    st.title("AdaptiveRAG — " + ("🕵️ Agent" if is_agent else "💬 Chat"))
+
+    # ── Unified conversation history (RAG + agent messages) ──
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            if msg.get("trace"):
+                render_agent_trace(msg["trace"])     # persisted Thought Process panel
+            if msg.get("sources"):
+                render_sources(msg["sources"])
+            if msg.get("grounding"):
+                render_grounding(msg["grounding"])
+
+    # ── New input, routed by mode ──
+    if is_agent:
+        handle_agent_input()
+    else:
+        handle_rag_input()
 
 def main():
     """App entry point — configure page, init, render."""

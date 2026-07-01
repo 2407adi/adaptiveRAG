@@ -14,14 +14,16 @@ See CLAUDE.md Block 3.1.
 from __future__ import annotations
 
 import builtins as _builtins
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 import ast              # the tool that reads code-text and draws its "sentence-diagram" tree
 import io               # gives us an in-memory text box we can use as our own out-tray
 import contextlib       # has the helper that swaps the out-tray for ours
 
-import multiprocessing          # the toolkit for creating and supervising separate "rooms" (processes)
-from queue import Empty         # the specific signal we get when the slot under the door is empty
+import sys              # lets us find THIS interpreter (sys.executable) to launch a fresh, identical one
+import json             # how the parent and the locked room pass notes (code in, result out)
+import subprocess       # launches a brand-new EMPTY room (fresh interpreter) — not a clone of this crowded one
+from pathlib import Path  # to locate src/ so the fresh room can import just this one light module
 
 # ── What the sandboxed code is allowed to see ──────────────────────────
 
@@ -86,86 +88,105 @@ def _apply_limits(cpu_seconds: int, mem_bytes: int | None) -> None:
             pass                             # macOS often ignores this one — fine, the time limit + timeout still apply
 
 
-def _worker(code: str, cpu_seconds: int, mem_bytes: int | None, queue) -> None:
-    """This whole function runs INSIDE the locked room (the child process).
-    It runs the stranger's code under the rules, then slides the result
-    back to the parent through `queue` (the slot under the door)."""
+def _execute(code: str, cpu_seconds: int, mem_bytes: int | None) -> SandboxResult:
+    """The work done INSIDE the locked room. Cap ourselves, run the stranger's
+    code under the rulebook, and return a result slip. This is the SAME pure-compute
+    logic as before — only the room it runs in has changed (a fresh, empty
+    interpreter instead of a clone of this crowded parent process)."""
 
     _apply_limits(cpu_seconds, mem_bytes)    # first thing inside the room: set the time + memory caps on ourselves
 
-    # Build the room's rulebook. "__builtins__" is the ONLY set of basic tools the
-    # stranger is allowed to touch — our whitelist, so no open()/import/eval exist for them.
-    # The ** spreads in the safe calculators (math, statistics, …) already sitting on the desk,
-    # so their code can use math.sqrt without ever needing to "import" anything.
+    # The room's rulebook. "__builtins__" is the ONLY set of basic tools the stranger may
+    # touch — our whitelist, so no open()/import/eval exist for them. The ** spreads in the
+    # safe calculators (math, statistics, …) already on the desk, so code can use math.sqrt
+    # without ever needing to "import".
     namespace = {"__builtins__": _ALLOWED_BUILTINS, **_ALLOWED_MODULES}
 
-    stdout = io.StringIO()                   # our own empty out-tray: anything the code print()s will pile up here, not on the screen
+    stdout = io.StringIO()                   # our own empty out-tray: the code's print()s pile up here, not on the screen
 
     try:
-        tree = ast.parse(code, mode="exec")  # read the recipe text and draw its structure-tree — this does NOT cook/run anything yet
+        tree = ast.parse(code, mode="exec")  # read the recipe text and draw its structure-tree — runs nothing yet
 
-        # Look at the very last line of the tree and ask: is it a value (an answer) or just an action?
-        last_expr: ast.Expr | None = None        # declare the type up front: either an expression node, or nothing
+        # Is the very last line a value (an "answer") or just an action?
+        last_expr: ast.Expr | None = None        # declare the type up front: an expression node, or nothing
         if tree.body:                            # only if the code has at least one line
-            last_node = tree.body[-1]            # grab the last line into a plain variable
+            last_node = tree.body[-1]            # grab the last line
             if isinstance(last_node, ast.Expr):  # is it a bare value (an "answer" line)?
-                last_expr = last_node            # yes → keep it; Pylance now KNOWS it's an ast.Expr, so .value is valid
-                tree.body.pop()                  # and remove it from the list so exec() runs only the action lines
+                last_expr = last_node            # yes → keep it (Pylance now KNOWS it's an ast.Expr)
+                tree.body.pop()                  # …and remove it so exec() runs only the action lines
 
-        with contextlib.redirect_stdout(stdout):   # for everything inside this block, swap the real out-tray for OUR out-tray
-            exec(compile(tree, "<sandbox>", "exec"), namespace)   # run all the ACTION lines, top to bottom, under the room's rulebook
+        with contextlib.redirect_stdout(stdout):   # swap the real out-tray for OUR out-tray
+            exec(compile(tree, "<sandbox>", "exec"), namespace)   # run the ACTION lines under the room's rulebook
             value_repr = None                 # default: no answer to report
-            if last_expr is not None:         # if we set aside a final answer line earlier…
-                result = eval(                # …now compute just that one line and grab the value it produces
-                    compile(ast.Expression(last_expr.value), "<sandbox>", "eval"),  # compile the final line in "give me a value" mode
+            if last_expr is not None:         # if we set aside a final answer line…
+                result = eval(                # …compute just that one line and grab its value
+                    compile(ast.Expression(last_expr.value), "<sandbox>", "eval"),  # "give me a value" mode
                     namespace,                # …still under the same restricted rulebook
                 )
-                value_repr = repr(result)     # turn that answer into text, e.g. the number 4 becomes the text "4"
+                value_repr = repr(result)     # turn the answer into text, e.g. 4 → "4"
 
-        # Success: slide a result under the door — the answer, plus everything that piled up in our out-tray.
-        queue.put(SandboxResult(ok=True, value=value_repr, stdout=stdout.getvalue()))
+        return SandboxResult(ok=True, value=value_repr, stdout=stdout.getvalue())
 
     except Exception as e:
-        # Something went wrong: the code tried open() (→ NameError, because it's not in the rulebook),
-        # ran out of CPU/memory (the manager hit it), or had bad syntax. Report failure,
-        # still handing back whatever they managed to print before failing.
-        queue.put(SandboxResult(ok=False, error=f"{type(e).__name__}: {e}",
-                                stdout=stdout.getvalue()))
-        
+        # open() → NameError, import → ImportError, [0]*10**12 → MemoryError, bad syntax → SyntaxError.
+        # Report failure, still handing back whatever they printed before failing.
+        return SandboxResult(ok=False, error=f"{type(e).__name__}: {e}",
+                             stdout=stdout.getvalue())
+
+
+def _child_main() -> None:
+    """The entry point that runs INSIDE the fresh room. Reads the job (code + caps)
+    from the note slid under the door (stdin), runs it, and slides the result slip
+    back out under the door (stdout) as JSON. This is what the parent launches."""
+    payload = json.loads(sys.stdin.read())               # the note under the door: {"code", "cpu_seconds", "mem_bytes"}
+    res = _execute(payload["code"], payload["cpu_seconds"], payload.get("mem_bytes"))
+    sys.stdout.write(json.dumps(asdict(res)))            # the result slip, back under the door
+
+
+# Where the `adaptiverag` package lives (src/), so the fresh room can import just THIS
+# one light module and nothing heavy. sandbox.py is src/adaptiverag/agents/sandbox.py,
+# so two levels up (parents[2]) is src/.
+_SRC = str(Path(__file__).resolve().parents[2])
 
 
 def run_python(
     code: str,
-    timeout: float = 5.0,                      # how many REAL seconds (stopwatch) we'll wait before evicting
-    cpu_seconds: int = 2,                      # how much CPU "hands-time" the building manager allows the room
-    mem_bytes: int | None = 256 * 1024 * 1024, # how big the room's whiteboard may get (256 MB)
+    timeout: float = 5.0,                      # REAL seconds (stopwatch) before we evict the room
+    cpu_seconds: int = 2,                      # CPU "hands-time" the building manager allows the room
+    mem_bytes: int | None = 256 * 1024 * 1024, # the room's whiteboard cap (256 MB)
 ) -> SandboxResult:
-    """Supervisor: build a fresh locked room, send the stranger's `code` in,
-    stand guard with a stopwatch, and return whatever comes back."""
+    """Supervisor: send the stranger's `code` down a CLEAN hallway into a fresh,
+    EMPTY room (a brand-new minimal interpreter), stand guard with a stopwatch,
+    and read back whatever slip comes out under the door.
 
-    ctx = multiprocessing.get_context("spawn")  # insist on the FRESH-ROOM policy — identical on Mac and Linux
-    result_q = ctx.Queue()                       # the slot under the door the worker will pass its result through
+    Why a fresh interpreter instead of multiprocessing-spawn: spawn CLONES the
+    parent's module graph. Inside the full app the parent is huge (torch, chroma,
+    langgraph…), so the clone was born oversized and our small caps killed it
+    before it could answer — surfacing as a bogus "CPU/memory limit exceeded" on
+    even 2+2. A fresh `python -E` imports only this one light module, so the caps
+    apply to a genuinely tiny room, exactly as intended.
+    """
+    # The room's orders: put src/ on the path, import ONLY this light module, run the child entry.
+    boot = (
+        f"import sys; sys.path.insert(0, {_SRC!r}); "
+        f"from adaptiverag.agents.sandbox import _child_main; _child_main()"
+    )
+    note = json.dumps({"code": code, "cpu_seconds": cpu_seconds, "mem_bytes": mem_bytes})
 
-    # Describe the room: run _worker (everything from Snippet 2), handing it the code,
-    # the two caps, and the slot. Nothing has started yet — this is just the blueprint.
-    proc = ctx.Process(target=_worker, args=(code, cpu_seconds, mem_bytes, result_q))
-
-    proc.start()              # build the room and send the stranger in — they begin working now
-    proc.join(timeout)        # lean on the wall with the stopwatch; return as soon as they finish OR `timeout` seconds pass
-
-    # ── Situation A: stopwatch ran out and they're STILL in there ──
-    if proc.is_alive():                          # still working after the clock expired → stuck/looping/stalling
-        proc.terminate()                         # knock the door down: polite "please stop" (SIGTERM)
-        proc.join(1)                             # give them up to 1 second to actually stop
-        if proc.is_alive():                      # somehow still standing?
-            proc.kill()                          # break the door, drag them out: forceful, cannot be ignored (SIGKILL)
-            proc.join()                          # wait for the room to be fully cleared
-        return SandboxResult(ok=False, error=f"Timed out after {timeout}s")  # report the eviction
-
-    # ── Situation B: they finished on their own — check the slot under the door ──
     try:
-        return result_q.get(timeout=1)           # there's a slip in the slot → read it; that's our answer (success OR clean error)
-    except Empty:
-        # Gone, but the slot is empty → the building manager evicted them mid-job
-        # for blowing the CPU or memory cap, too abruptly to leave a note.
-        return SandboxResult(ok=False, error="Killed (CPU or memory limit exceeded)")
+        # -E ignores PYTHON* env vars → a clean room. We slide the note in via stdin and
+        # read the result slip from stdout. `timeout` is the wall-clock stopwatch.
+        proc = subprocess.run(
+            [sys.executable, "-E", "-c", boot],
+            input=note, capture_output=True, text=True, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return SandboxResult(ok=False, error=f"Timed out after {timeout}s")   # stopwatch caught a stall/loop
+
+    # No slip under the door (empty stdout) or a non-zero exit → the manager evicted the
+    # room (CPU/memory cap) or the code crashed the interpreter. Now we can say why.
+    if proc.returncode != 0 or not proc.stdout.strip():
+        tail = proc.stderr.strip().splitlines()[-1] if proc.stderr.strip() else f"exit code {proc.returncode}"
+        return SandboxResult(ok=False, error=f"Killed (resource limit or crash): {tail}")
+
+    return SandboxResult(**json.loads(proc.stdout))   # read the result slip back into a SandboxResult

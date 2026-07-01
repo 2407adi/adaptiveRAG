@@ -106,6 +106,16 @@ class RoutingConfig:
             self.examples = []
 
 @dataclass
+class AgentConfig:
+    max_iterations: int = 6                     # the detective's move budget — REASON checks it, ACT ticks it
+    require_approval: list[str] = field(        # specialists that need the supervisor's warrant before ACT
+        default_factory=lambda: ["run_python", "web_search"]
+    )
+    # No __post_init__ needed: YAML hands these over as a plain int and a
+    # plain list-of-strings — already the right types, nothing to coerce.
+    # (Contrast ToolsConfig, which DOES coerce because its values are nested dicts.)
+
+@dataclass
 class SandboxConfig:
     timeout: float = 5.0        # wall-clock seconds before the locked room is evicted
     cpu_seconds: int = 2        # CPU-time cap the building manager (OS) enforces
@@ -150,6 +160,7 @@ class Settings:
     azure: AzureConfig = field(default_factory=AzureConfig)
     routing: RoutingConfig = field(default_factory=RoutingConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    agent: AgentConfig = field(default_factory=AgentConfig)   # the detective's house rules
 
 
 def load_settings() -> Settings:
@@ -175,6 +186,7 @@ def load_settings() -> Settings:
         ),
         routing=RoutingConfig(**cfg.get("routing", {})),
         tools=ToolsConfig(**cfg.get("tools", {})),
+        agent=AgentConfig(**cfg.get("agent", {})),   # pull the `agent:` YAML block, fall back to defaults
     )
 
 
