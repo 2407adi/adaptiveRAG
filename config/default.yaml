@@ -104,3 +104,11 @@ agent:
   require_approval:                 # tools that need the supervisor's warrant (interrupt) before running
     - run_python
     - web_search
+
+# ── Memory Config ────────────────────────
+memory:
+  enabled: true
+  max_turns: 10
+  recall_k: 3
+  recall_score_threshold: 0.3      # cosine sim (all-MiniLM); ~0.3 lenient, raise to be stricter
+  collection_name: conversation_memory

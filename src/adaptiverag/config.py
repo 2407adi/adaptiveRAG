@@ -116,6 +116,16 @@ class AgentConfig:
     # (Contrast ToolsConfig, which DOES coerce because its values are nested dicts.)
 
 @dataclass
+class MemoryConfig:
+    enabled: bool = True                    # master switch — off = agent behaves as before
+    max_turns: int = 10                     # clipboard size (messages, not exchanges); 10 ≈ 5 back-and-forths
+    recall_k: int = 3                       # how many past cards recall() returns at most
+    recall_score_threshold: float = 0.3     # min similarity to actually INJECT a recalled card (else skip)
+    collection_name: str = "conversation_memory"   # the archive's own Chroma drawer, kept apart from doc chunks
+    # Flat scalars straight from YAML — no __post_init__ needed (same as AgentConfig).
+
+
+@dataclass
 class SandboxConfig:
     timeout: float = 5.0        # wall-clock seconds before the locked room is evicted
     cpu_seconds: int = 2        # CPU-time cap the building manager (OS) enforces
@@ -161,6 +171,7 @@ class Settings:
     routing: RoutingConfig = field(default_factory=RoutingConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)   # the detective's house rules
+    memory: MemoryConfig = field(default_factory=MemoryConfig)   # conversation-memory dials
 
 
 def load_settings() -> Settings:
@@ -187,6 +198,7 @@ def load_settings() -> Settings:
         routing=RoutingConfig(**cfg.get("routing", {})),
         tools=ToolsConfig(**cfg.get("tools", {})),
         agent=AgentConfig(**cfg.get("agent", {})),   # pull the `agent:` YAML block, fall back to defaults
+        memory=MemoryConfig(**cfg.get("memory", {})),   # pull the `memory:` YAML block, fall back to defaults
     )
 
 
