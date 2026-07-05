@@ -24,6 +24,7 @@ class AgentState(TypedDict):
     """The case file on the whiteboard — passed desk to desk, edited in place."""
 
     question: str                                   # the case to crack (written once, never changes)
+    conversation_context: str
 
     # The notepad of moves. Annotated[...] = "a list, WITH a special rule attached".
     # That rule is operator.add: when a desk returns scratchpad entries, LangGraph
@@ -59,7 +60,7 @@ Rules:
 
 
 def _build_reason_prompt(question: str, scratchpad: list[dict],
-                         tools: list[dict]) -> str:
+                         tools: list[dict], conversation_context: str = "") -> str:
     """Brief the detective: the case, the roster of specialists, and the moves
     so far — then ask for the next single move (or the verdict)."""
 
@@ -82,6 +83,12 @@ def _build_reason_prompt(question: str, scratchpad: list[dict],
             trail_lines.append(f"Observation: {entry['content']}")
     trail_block = "\n".join(trail_lines) if trail_lines else "(no moves yet)"
 
+    # The clerk's briefing — only shown if there's anything to say (empty on turn one).
+    memory_block = (
+        f"What you already know from this conversation:\n{conversation_context}\n\n"
+        if conversation_context else ""
+    )
+
     # 3. Assemble the full briefing. The trailing "Your next step:" cue invites
     #    the model to continue the transcript with exactly one block.
     return f"""You are a problem-solving agent that answers the user's question \
@@ -92,7 +99,7 @@ Available tools:
 
 {_REACT_INSTRUCTIONS}
 
-User question: {question}
+{memory_block}User question: {question}
 
 Work so far:
 {trail_block}
@@ -181,6 +188,7 @@ def make_reason_node(llm_client, registry, max_iterations: int):
         # 1. Brief the detective: question + notepad + roster of business cards.
         prompt = _build_reason_prompt(
             state["question"], state["scratchpad"], registry.list_tools(),
+            state.get("conversation_context", ""),   # the pinned briefing
         )
         # 2. The detective thinks out loud — one LLM call.
         reply = llm_client.generate(prompt)
@@ -247,8 +255,9 @@ class AgentExecutor:
 
     def __init__(self, llm_client, registry, *,
                  max_iterations: int = 6,
-                 require_approval: list[str] | None = None):
+                 require_approval: list[str] | None = None, memory=None):
         self.registry = registry
+        self._memory = memory
         self.policy = ApprovalPolicy(require_approval or [])   # the warrant house-rule
 
         # Build the three desks (closures, deps baked in — Steps 5/6/7).
@@ -303,17 +312,22 @@ class AgentExecutor:
 
     def _package(self, state: dict, thread_id: str) -> dict:
         """Translate LangGraph's raw output into our result shape: paused or done."""
-        interrupts = state.get("__interrupt__")          # present iff the graph froze at the gate
-        if interrupts:
+        interrupts = state.get("__interrupt__")
+        if interrupts:                                # frozen at the gate — NOT done, don't file anything
             return {
                 "status": "awaiting_approval",
-                "request": interrupts[0].value,          # the payload we passed to interrupt()
+                "request": interrupts[0].value,
                 "thread_id": thread_id,
                 "trace": state.get("scratchpad", []),
             }
-        return {                                         # the graph reached END
+
+        answer = state.get("answer")
+        if self._memory and answer:                   # verdict reached → clerk files the detective's answer
+            self._memory.add_turn("assistant", answer)
+
+        return {
             "status": "done",
-            "answer": state.get("answer"),
+            "answer": answer,
             "trace": state.get("scratchpad", []),
             "thread_id": thread_id,
         }
@@ -321,8 +335,16 @@ class AgentExecutor:
     def start(self, question: str, thread_id: str | None = None) -> dict:
         """Open a new case. Runs until the verdict OR the first warrant request."""
         thread_id = thread_id or uuid.uuid4().hex        # a fresh label per case
+
+        # Clerk's briefing FIRST (so 'recent' excludes the question we're about to
+        # ask), THEN log the client's question into both memory tiers.
+        context = self._memory.build_context(question) if self._memory else ""
+        if self._memory:
+            self._memory.add_turn("user", question)
+
+
         initial: AgentState = {
-            "question": question, "scratchpad": [],
+            "question": question, "scratchpad": [], "conversation_context": context,
             "pending_action": None, "answer": None, "iterations": 0,
         }
         state = self._graph.invoke(initial, self._config(thread_id))

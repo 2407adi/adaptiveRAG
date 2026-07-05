@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import os
+import uuid                                  # a per-session conversation id
 
 from .config import Settings
 from .ingest.loader import DocumentLoader
@@ -28,6 +29,7 @@ from .retrieve.hybrid import BM25Retriever, HybridRetriever
 
 from .agents.tools import build_default_registry, ToolRegistry
 from .agents.executor import AgentExecutor
+from .agents.memory import BufferMemory, VectorMemory, ConversationMemory
 
 @dataclass
 class Pipeline:
@@ -48,6 +50,7 @@ class Pipeline:
     grounding_validator: GroundingValidator
     tool_registry: ToolRegistry | None = None      # Block 3.1 front desk (shared + audited)
     agent_executor: AgentExecutor | None = None    # Block 3.2 ReAct detective
+    memory: ConversationMemory | None = None        # Block 3.3 conversation-memory clerk
 
 
 def wire_pipeline(
@@ -154,6 +157,25 @@ def wire_pipeline(
     # 10. Grounding validator (hallucination detection)
     grounding_validator = GroundingValidator(llm_client=llm_client, threshold=0.6)
 
+    # 11. Conversation memory (Block 3.3): short-term buffer + long-term vector
+    #     archive, behind the ConversationMemory clerk. Gated by config. Its OWN
+    #     Chroma collection (separate drawer) in the SAME persist dir, so memory
+    #     cards never mix with document chunks. Reuses the shared embedder.
+    memory = None
+    if settings.memory.enabled:
+        memory_store = create_vector_store(
+            backend="chroma",
+            collection_name=settings.memory.collection_name,   # e.g. "conversation_memory"
+            persist_directory=persist_directory,               # same room, different drawer
+        )
+        memory = ConversationMemory(
+            buffer=BufferMemory(max_turns=settings.memory.max_turns),
+            vector=VectorMemory(embedder=embedder, vector_store=memory_store),
+            recall_k=settings.memory.recall_k,
+            recall_score_threshold=settings.memory.recall_score_threshold,
+            conversation_id=uuid.uuid4().hex,   # one id per wired session ≈ one conversation
+        )
+
     # Wiring agents pipeline
     hmac_key = os.getenv("AUDIT_HMAC_KEY")
     tool_registry = None
@@ -168,6 +190,7 @@ def wire_pipeline(
             llm_client, tool_registry,
             max_iterations=settings.agent.max_iterations,
             require_approval=settings.agent.require_approval,
+            memory=memory,        # Block 3.3 — agent reads the briefing + records each turn
         )
 
     return Pipeline(
@@ -182,4 +205,5 @@ def wire_pipeline(
         grounding_validator=grounding_validator,
         tool_registry=tool_registry,
         agent_executor=agent_executor,
+        memory=memory,
     )
