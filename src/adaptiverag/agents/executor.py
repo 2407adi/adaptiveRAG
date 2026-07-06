@@ -60,9 +60,13 @@ Rules:
 
 
 def _build_reason_prompt(question: str, scratchpad: list[dict],
-                         tools: list[dict], conversation_context: str = "") -> str:
+                         tools: list[dict], conversation_context: str = "", role: str | None = None) -> str:
     """Brief the detective: the case, the roster of specialists, and the moves
     so far — then ask for the next single move (or the verdict)."""
+
+    persona = role or ("You are a problem-solving agent that answers the user's "
+                       "question by using tools. You reason step by step and call "
+                       "one tool at a time.")
 
     # 1. The roster — one business card per specialist (from registry.list_tools()).
     tool_lines = []
@@ -91,8 +95,7 @@ def _build_reason_prompt(question: str, scratchpad: list[dict],
 
     # 3. Assemble the full briefing. The trailing "Your next step:" cue invites
     #    the model to continue the transcript with exactly one block.
-    return f"""You are a problem-solving agent that answers the user's question \
-by using tools. You reason step by step and call one tool at a time.
+    return f"""{persona}
 
 Available tools:
 {tools_block}
@@ -173,27 +176,38 @@ def _parse_reason_output(raw: str) -> ReasonStep:
     return ReasonStep(thought=thought, is_final=True, answer=text)
 
 
-def make_reason_node(llm_client, registry, max_iterations: int):
+def make_reason_node(llm_client, registry, max_iterations: int, role: str | None = None):
     """Factory: build the THINK desk with its llm / roster / budget baked in
     (closure — same trick as make_run_python in tools.py)."""
 
     def reason_node(state: AgentState) -> dict:
-        # Egg timer: out of moves? Stop with an honest note instead of looping.
-        if state["iterations"] >= max_iterations:
-            return {
-                "answer": f"Stopped after {max_iterations} steps without a final answer.",
-                "pending_action": None,
-            }
+        # Egg timer fired? Don't throw the notepad away (all those Observations
+        # were paid for!) — allow ONE last, tool-free call that files a report
+        # from the findings so far.
+        out_of_budget = state["iterations"] >= max_iterations
 
         # 1. Brief the detective: question + notepad + roster of business cards.
         prompt = _build_reason_prompt(
             state["question"], state["scratchpad"], registry.list_tools(),
-            state.get("conversation_context", ""),   # the pinned briefing
+            state.get("conversation_context", ""),
+            role=role,                                   # NEW: pin the badge on the persona line
         )
+        if out_of_budget:
+            prompt += ("\nIMPORTANT: Your tool budget is exhausted. Do NOT choose "
+                       "another Action. Write 'Final Answer:' NOW, summarizing every "
+                       "useful finding from your Observations above (with sources).")
+
         # 2. The detective thinks out loud — one LLM call.
         reply = llm_client.generate(prompt)
         # 3. Read the reply: a dispatch order, or the verdict.
         step = _parse_reason_output(reply)
+
+        # Out of budget AND it still tried to act? Hard stop — honest note.
+        if out_of_budget and not step.is_final:
+            return {
+                "answer": f"Stopped after {max_iterations} steps without a final answer.",
+                "pending_action": None,
+            }
 
         # 4. Always jot the Thought on the notepad. NOTE: we return only the
         #    DELTA (new entries); the operator.add reducer appends it (Step 2).

@@ -76,6 +76,28 @@ def render_grounding(grounding):
                 st.caption("Not found in the source documents")
 
 
+def _render_trace_entries(trace):
+    """The Thought → Action → Observation lines themselves (no expander).
+    Shared by render_agent_trace and render_supervisor_reports — Streamlit
+    forbids nesting expanders, so the wrapper differs but the body is one."""
+    for entry in trace:
+        kind = entry.get("type")
+        if kind == "thought":
+            st.markdown(f"💭 **Thought:** {entry.get('content', '')}")
+        elif kind == "action":
+            st.markdown(f"🔧 **Action:** `{entry.get('tool', '')}`")
+            args = entry.get("args") or {}
+            if args:
+                st.code(json.dumps(args, indent=2), language="json")
+        elif kind == "observation":
+            content = entry.get("content", "")
+            if len(content) > 1500:                       # keep long tool output readable
+                content = content[:1500] + " …"
+            st.markdown("👁️ **Observation:**")
+            st.caption(content)
+        st.divider()
+
+
 def render_agent_trace(trace, expanded=False):
     """Show the agent's Thought → Action → Observation trail in an expander.
 
@@ -88,19 +110,32 @@ def render_agent_trace(trace, expanded=False):
         return
 
     with st.expander("🧠 Thought Process", expanded=expanded):
-        for entry in trace:
-            kind = entry.get("type")
-            if kind == "thought":
-                st.markdown(f"💭 **Thought:** {entry.get('content', '')}")
-            elif kind == "action":
-                st.markdown(f"🔧 **Action:** `{entry.get('tool', '')}`")
-                args = entry.get("args") or {}
-                if args:
-                    st.code(json.dumps(args, indent=2), language="json")
-            elif kind == "observation":
-                content = entry.get("content", "")
-                if len(content) > 1500:                       # keep long tool output readable
-                    content = content[:1500] + " …"
-                st.markdown("👁️ **Observation:**")
-                st.caption(content)
-            st.divider()
+        _render_trace_entries(trace)
+
+
+_AGENT_BADGES = {"retriever": "🔎", "reasoner": "🧮", "validator": "✅"}
+
+
+def render_supervisor_reports(reports, expanded=False):
+    """Block 3.4: the firm's case file — one section per junior dispatched,
+    showing the polished report plus that junior's private notepad (trace).
+
+    `reports` comes from SupervisorAgent results: a list of
+    {"agent": name, "report": str, "trace": [scratchpad entries]}.
+    Persisted on the chat message, same as render_agent_trace.
+    """
+    if not reports:
+        return
+
+    with st.expander(f"🕵️ Team Reports ({len(reports)})", expanded=expanded):
+        for i, r in enumerate(reports, 1):
+            agent = r.get("agent", "?")
+            badge = _AGENT_BADGES.get(agent, "🕵️")
+            st.markdown(f"#### {badge} {i}. {agent.capitalize()}'s report")
+            st.markdown(r.get("report", "_(empty report)_"))
+            trace = r.get("trace") or []
+            if trace:
+                st.markdown("**Notepad (working-out):**")
+                _render_trace_entries(trace)
+            if i < len(reports):
+                st.divider()

@@ -104,6 +104,8 @@ agent:
   require_approval:                 # tools that need the supervisor's warrant (interrupt) before running
     - run_python
     - web_search
+  max_handoffs: 6                   # Block 3.4: the Chief's delegation budget (juniors per case)
+  worker_iterations: 4              # Block 3.4: each junior's private tool budget (3 was too tight for multi-phrase searching)
 
 # ── Memory Config ────────────────────────
 memory:

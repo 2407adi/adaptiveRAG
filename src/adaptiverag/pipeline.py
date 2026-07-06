@@ -29,6 +29,7 @@ from .retrieve.hybrid import BM25Retriever, HybridRetriever
 
 from .agents.tools import build_default_registry, ToolRegistry
 from .agents.executor import AgentExecutor
+from .agents.supervisor import SupervisorAgent
 from .agents.memory import BufferMemory, VectorMemory, ConversationMemory
 
 @dataclass
@@ -51,6 +52,7 @@ class Pipeline:
     tool_registry: ToolRegistry | None = None      # Block 3.1 front desk (shared + audited)
     agent_executor: AgentExecutor | None = None    # Block 3.2 ReAct detective
     memory: ConversationMemory | None = None        # Block 3.3 conversation-memory clerk
+    supervisor_agent: SupervisorAgent | None = None  # Block 3.4 the firm (Chief + 3 juniors)
 
 
 def wire_pipeline(
@@ -180,6 +182,7 @@ def wire_pipeline(
     hmac_key = os.getenv("AUDIT_HMAC_KEY")
     tool_registry = None
     agent_executor = None
+    supervisor_agent = None
     if hmac_key:
         tool_registry = build_default_registry(
             rag_chain, settings.tools,
@@ -191,6 +194,14 @@ def wire_pipeline(
             max_iterations=settings.agent.max_iterations,
             require_approval=settings.agent.require_approval,
             memory=memory,        # Block 3.3 — agent reads the briefing + records each turn
+        )
+        # Block 3.4 — the firm. SAME registry (shared audit log), same approval
+        # house rule; only the org chart differs. UI toggles between the two.
+        supervisor_agent = SupervisorAgent(
+            llm_client, tool_registry,
+            max_handoffs=settings.agent.max_handoffs,
+            worker_iterations=settings.agent.worker_iterations,
+            require_approval=settings.agent.require_approval,
         )
 
     return Pipeline(
@@ -206,4 +217,5 @@ def wire_pipeline(
         tool_registry=tool_registry,
         agent_executor=agent_executor,
         memory=memory,
+        supervisor_agent=supervisor_agent,
     )

@@ -14,7 +14,8 @@ import json
 
 from adaptiverag.config import settings
 from adaptiverag.reason.router import QueryRoute
-from components import render_sources, render_grounding, render_agent_trace
+from components import (render_sources, render_grounding, render_agent_trace,
+                        render_supervisor_reports)
 
 
 from adaptiverag.pipeline import wire_pipeline
@@ -38,6 +39,7 @@ def init_pipeline():
     st.session_state.rag_chain = bundle.rag_chain
     st.session_state.tool_registry = bundle.tool_registry     # Block 3.1 (shared, from wire_pipeline)
     st.session_state.agent_executor = bundle.agent_executor   # Block 3.2 ReAct detective
+    st.session_state.supervisor_agent = bundle.supervisor_agent  # Block 3.4 the firm (Chief + juniors)
     st.session_state.router = bundle.router
     st.session_state.multi_step_chain = bundle.multi_step_chain
     st.session_state.llm_client = bundle.llm_client
@@ -137,16 +139,37 @@ def render_sidebar():
         if st.session_state.get("agent_executor") is None:
             st.caption("⚠️ Agent needs AUDIT_HMAC_KEY in .env")
 
-def _handle_agent_result(result):
-    """Fold an executor result into session state: pause for approval, or finish."""
+        # ── Block 3.4: lone detective vs the firm (ablation lever) ──
+        if st.session_state.mode.startswith("Agent"):
+            st.session_state.supervisor_mode = st.toggle(
+                "🕵️ Supervisor mode (multi-agent)",
+                value=st.session_state.get("supervisor_mode", False),
+                disabled=st.session_state.get("supervisor_agent") is None,
+                help="OFF: one ReAct agent does everything. ON: a supervisor "
+                     "delegates to specialists — retriever → reasoner → validator "
+                     "(same 3 tools, different system prompts). Independently "
+                     "switchable so each layer can be ablation-tested.",
+            )
+
+def _active_agent():
+    """Which object answers the chat box: the firm or the lone detective."""
+    if st.session_state.get("supervisor_mode"):
+        return st.session_state.get("supervisor_agent"), "supervisor"
+    return st.session_state.get("agent_executor"), "react"
+
+
+def _handle_agent_result(result, agent_kind="react"):
+    """Fold an agent result into session state: pause for approval, or finish."""
     if result["status"] == "awaiting_approval":
-        st.session_state.agent_pending = result           # stash thread_id + request + partial trace
+        result["agent_kind"] = agent_kind                 # remember WHO froze, for resume()
+        st.session_state.agent_pending = result           # thread_id + request (+ partial work)
     else:                                                  # "done"
         st.session_state.agent_pending = None
         st.session_state.messages.append({
             "role": "assistant",
             "content": result.get("answer") or "(no answer)",
-            "trace": result.get("trace", []),
+            "trace": result.get("trace", []),              # lone detective's notepad
+            "reports": result.get("reports", []),          # the firm's case file (per-junior)
             "mode": "agent",
         })
 
@@ -161,7 +184,10 @@ def render_approval_gate():
         st.markdown(f"**Tool:** `{req['tool']}`")
         if req.get("args"):
             st.code(json.dumps(req["args"], indent=2), language="json")
+        # Show the work-in-progress: the detective's notepad, or the firm's
+        # reports so far (the frozen junior's notepad is still in his office).
         render_agent_trace(pending.get("trace", []), expanded=True)
+        render_supervisor_reports(pending.get("reports", []), expanded=True)
 
         reason = st.text_input("Reason (optional)", key="approval_reason")
         c1, c2, _ = st.columns([1, 1, 4])
@@ -170,16 +196,22 @@ def render_approval_gate():
 
     if approve or reject:
         decision = {"approved": bool(approve), "reason": reason.strip()}
+        # Resume the SAME object that froze — the toggle may have moved since.
+        kind = pending.get("agent_kind", "react")
+        agent = (st.session_state.supervisor_agent if kind == "supervisor"
+                 else st.session_state.agent_executor)
         with st.spinner("Resuming agent…"):
-            result = st.session_state.agent_executor.resume(pending["thread_id"], decision)
-        _handle_agent_result(result)
+            result = agent.resume(pending["thread_id"], decision)
+        _handle_agent_result(result, kind)
         st.rerun()
 
 
 def handle_agent_input():
-    """Agent mode: drive start() / resume() with the approval gate in between."""
-    ex = st.session_state.get("agent_executor")
-    if ex is None:
+    """Agent mode: drive start() / resume() with the approval gate in between.
+    The supervisor toggle decides WHO answers: lone detective or the firm —
+    both expose the same start()/resume() face, so the flow is identical."""
+    agent, kind = _active_agent()
+    if agent is None:
         st.error("Agent unavailable — set AUDIT_HMAC_KEY in your .env and restart.")
         return
 
@@ -192,9 +224,11 @@ def handle_agent_input():
         disabled=bool(st.session_state.get("agent_pending")),
     ):
         st.session_state.messages.append({"role": "user", "content": user_input})
-        with st.spinner("🕵️ Agent working — thinking and using tools…"):
-            result = ex.start(user_input)
-        _handle_agent_result(result)
+        spinner_text = ("🕵️ Supervisor delegating to the team…" if kind == "supervisor"
+                        else "🕵️ Agent working — thinking and using tools…")
+        with st.spinner(spinner_text):
+            result = agent.start(user_input)
+        _handle_agent_result(result, kind)
         st.rerun()
 
 
@@ -266,6 +300,8 @@ def render_chat():
             st.markdown(msg["content"])
             if msg.get("trace"):
                 render_agent_trace(msg["trace"])     # persisted Thought Process panel
+            if msg.get("reports"):
+                render_supervisor_reports(msg["reports"])   # persisted per-junior case file
             if msg.get("sources"):
                 render_sources(msg["sources"])
             if msg.get("grounding"):

@@ -111,6 +111,9 @@ class AgentConfig:
     require_approval: list[str] = field(        # specialists that need the supervisor's warrant before ACT
         default_factory=lambda: ["run_python", "web_search"]
     )
+    # ── Block 3.4: the firm (SupervisorAgent) ──
+    max_handoffs: int = 6                       # the Chief's delegation budget (juniors dispatched per case)
+    worker_iterations: int = 3                  # each junior's private tool budget inside their office
     # No __post_init__ needed: YAML hands these over as a plain int and a
     # plain list-of-strings — already the right types, nothing to coerce.
     # (Contrast ToolsConfig, which DOES coerce because its values are nested dicts.)
