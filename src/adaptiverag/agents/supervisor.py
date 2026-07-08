@@ -7,8 +7,16 @@ only their one-page role briefing (system prompt) differs. See CLAUDE.md 3.4.
 from __future__ import annotations
 
 import operator                                      # operator.add = the "append, don't overwrite" rule
-from typing import Annotated, Optional, TypedDict
-from typing import Hashable 
+from typing import Annotated, Optional, TypedDict, cast
+from typing import Hashable
+from collections.abc import Iterator
+
+from langgraph.graph import StateGraph, START, END
+from .executor import (AgentState, _build_reason_prompt,
+                       make_reason_node, make_act_node, _section_after,
+                       _relay_sections)
+from langgraph.config import get_stream_writer
+from .approval import ApprovalPolicy, make_human_gate
 
 
 class SupervisorState(TypedDict):
@@ -76,10 +84,7 @@ def _format_reports(reports: list[dict]) -> str:
     blocks = [f"[{r['agent']} report]\n{r['report']}" for r in reports]
     return "Work done so far by other agents:\n\n" + "\n\n".join(blocks)
 
-from langgraph.graph import StateGraph, START, END
-from .executor import (AgentState, _build_reason_prompt,   # noqa: F401 (reports helper still uses it? no — drop if unused)
-                       make_reason_node, make_act_node, _section_after)
-from .approval import ApprovalPolicy, make_human_gate
+
 
 
 def _build_worker_graph(name: str, llm_client, registry,
@@ -218,10 +223,17 @@ def make_supervisor_node(llm_client, max_handoffs: int = 6):
             )
             return {"answer": forced.strip(), "next_agent": None}
 
-        # Normal turn: read the case file, decide, parse the slip.
-        reply = llm_client.generate(
-            _build_supervisor_prompt(state["question"], state["reports"])
-        )
+        # Normal turn: the Chief dictates. While deciding, nothing streams
+        # (no marker appears); when FINISHing, the closing memo streams live.
+        prompt = _build_supervisor_prompt(state["question"], state["reports"])
+        if hasattr(llm_client, "generate_stream"):
+            reply = _relay_sections(
+                llm_client.generate_stream(prompt), get_stream_writer(),
+                {"decision:": None, "final answer:": "token"},   # Chief's own markers
+            )
+        else:
+            reply = llm_client.generate(prompt)
+
         next_agent, answer = _parse_supervisor_reply(reply)
 
         if answer is not None:
@@ -318,3 +330,60 @@ class SupervisorAgent:
             decision = approver(result["request"])
             result = self.resume(result["thread_id"], decision)
         return result
+    
+    def _stream_events(self, graph_input, thread_id: str) -> Iterator[dict]:
+        """The firm narrated live: handoffs, each junior's thoughts and moves,
+        filed reports, and the Chief's closing memo dictated token by token."""
+        answer = None
+        for item in self._graph.stream(
+            graph_input, self._config(thread_id),
+            stream_mode=["updates", "custom"],
+            subgraphs=True,                       # ← also surface events from inside the offices
+        ):
+            ns, mode, payload = cast("tuple[tuple[str, ...], str, dict]", item)
+            agent = ns[0].split(":")[0] if ns else None   # which office, e.g. "retriever"; None = firm floor
+
+            if mode == "custom":                          # live dictation from some desk
+                if agent is None:
+                    yield payload                         # the Chief — "token" here IS the real answer
+                elif payload.get("type") == "token":      # a junior's Final Answer = their REPORT,
+                    yield {"type": "report_token",        #   relabel so the UI never confuses it
+                           "agent": agent, "text": payload.get("text", "")}
+                else:                                     # a junior thinking out loud
+                    yield {"type": "thought", "agent": agent, "text": payload.get("text", "")}
+                continue
+
+            if "__interrupt__" in payload:                # some office's gate froze the whole firm
+                yield {"type": "approval",
+                       "request": payload["__interrupt__"][0].value,
+                       "thread_id": thread_id}
+                return
+
+            for node_name, node_updates in payload.items():
+                nu = node_updates or {}
+                if agent is not None:                     # inside an office: their notepad, live
+                    for entry in nu.get("scratchpad", []):
+                        yield {"type": "trace", "agent": agent, "entry": entry}
+                elif node_name == "supervisor":           # the Chief's desk
+                    if nu.get("next_agent"):
+                        yield {"type": "handoff", "agent": nu["next_agent"]}
+                    if nu.get("answer") is not None:
+                        answer = nu["answer"]             # closing memo — hold for done
+                else:                                     # a doorman pinned a finished report
+                    for r in nu.get("reports", []):
+                        yield {"type": "report", "agent": r["agent"], "report": r["report"]}
+
+        yield {"type": "done", "answer": answer, "thread_id": thread_id}
+
+    def start_stream(self, question: str, thread_id: str | None = None) -> Iterator[dict]:
+        """start(), narrated live."""
+        thread_id = thread_id or uuid.uuid4().hex
+        initial: SupervisorState = {
+            "question": question, "reports": [],
+            "next_agent": None, "answer": None, "handoffs": 0,
+        }
+        yield from self._stream_events(initial, thread_id)
+
+    def resume_stream(self, thread_id: str, decision) -> Iterator[dict]:
+        """resume(), narrated. May freeze again at another gate — client loops."""
+        yield from self._stream_events(Command(resume=decision), thread_id)

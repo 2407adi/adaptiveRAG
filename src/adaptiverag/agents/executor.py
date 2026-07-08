@@ -7,9 +7,20 @@ any risky move. State machine built on LangGraph. See CLAUDE.md Block 3.2.
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any, Optional, TypedDict
+from typing import Annotated, Any, Optional, TypedDict, cast
 import json   # json.dumps turns a Python dict into a JSON string for the prompt
 from dataclasses import dataclass
+from collections.abc import Iterator
+
+from langgraph.graph import StateGraph, START, END        # the flowchart builder + entrance/exit markers
+from langgraph.checkpoint.memory import MemorySaver        # in-RAM snapshot saver (needed for interrupt)
+
+from .approval import ApprovalPolicy, make_human_gate
+import uuid
+from langgraph.types import Command          # the "un-freeze with this decision" wrapper
+from langchain_core.runnables import RunnableConfig   # the TypedDict invoke() expects for `config`
+
+from langgraph.config import get_stream_writer   # a node's slot for pushing custom notes outward
 
 
 # This class is kind of a "memory" that the agent has about what all has happoened so far (Scratchpad)
@@ -175,6 +186,38 @@ def _parse_reason_output(raw: str) -> ReasonStep:
     # Neither parsed → treat the whole reply as the answer (safe degrade).
     return ReasonStep(thought=thought, is_final=True, answer=text)
 
+_SECTIONS = {"thought:": "thought", "action:": None,      # None = don't stream this section
+             "action input:": None, "final answer:": "token"}
+
+
+def _relay_sections(pieces, writer, sections: dict | None = None) -> str:
+    """Watch a dictation live; forward marked sections to the writer.
+    Returns the full reply for the parser. Default sections = ReAct's."""
+    sections = sections or _SECTIONS
+    hold = max(len(m) for m in sections)       # marker may arrive split — withhold this tail
+    buffer, pos, mode = "", 0, None
+    for piece in pieces:
+        buffer += piece
+        while True:
+            low = buffer.lower()
+            nxt, which = None, None
+            for m in sections:                 # ← was _SECTIONS
+                i = low.find(m, pos)
+                if i != -1 and (nxt is None or i < nxt):
+                    nxt, which = i, m
+            if nxt is None or which is None:
+                break
+            if mode and nxt > pos:
+                writer({"type": mode, "text": buffer[pos:nxt]})
+            mode, pos = sections[which], nxt + len(which)   # ← was _SECTIONS
+        safe = len(buffer) - hold              # ← was _HOLD
+        if mode and safe > pos:
+            writer({"type": mode, "text": buffer[pos:safe]})
+            pos = safe
+    if mode and pos < len(buffer):
+        writer({"type": mode, "text": buffer[pos:]})
+    return buffer
+
 
 def make_reason_node(llm_client, registry, max_iterations: int, role: str | None = None):
     """Factory: build the THINK desk with its llm / roster / budget baked in
@@ -197,8 +240,11 @@ def make_reason_node(llm_client, registry, max_iterations: int, role: str | None
                        "another Action. Write 'Final Answer:' NOW, summarizing every "
                        "useful finding from your Observations above (with sources).")
 
-        # 2. The detective thinks out loud — one LLM call.
-        reply = llm_client.generate(prompt)
+        # 2. The detective dictates; thoughts and verdict stream out live.
+        if hasattr(llm_client, "generate_stream"):
+            reply = _relay_sections(llm_client.generate_stream(prompt), get_stream_writer())
+        else:                                  # test fakes without generate_stream still work
+            reply = llm_client.generate(prompt)
         # 3. Read the reply: a dispatch order, or the verdict.
         step = _parse_reason_output(reply)
 
@@ -252,15 +298,6 @@ def make_act_node(registry):
 
     return act_node
 
-
-
-from langgraph.graph import StateGraph, START, END        # the flowchart builder + entrance/exit markers
-from langgraph.checkpoint.memory import MemorySaver        # in-RAM snapshot saver (needed for interrupt)
-
-from .approval import ApprovalPolicy, make_human_gate
-import uuid
-from langgraph.types import Command          # the "un-freeze with this decision" wrapper
-from langchain_core.runnables import RunnableConfig   # the TypedDict invoke() expects for `config`
 
 
 class AgentExecutor:
@@ -380,3 +417,48 @@ class AgentExecutor:
             decision = approver(result["request"])
             result = self.resume(result["thread_id"], decision)
         return result
+    
+    def _stream_events(self, graph_input, thread_id: str) -> Iterator[dict]:
+        """Shared narrator for start/resume: desk updates AND live dictation."""
+        answer = None
+        for item in self._graph.stream(                   # two channels → (mode, payload) tuples
+            graph_input, self._config(thread_id),
+            stream_mode=["updates", "custom"],
+        ):
+            mode, payload = cast("tuple[str, dict]", item)   # stubs don't know list-mode ⇒ tuples
+            if mode == "custom":                          # a note from get_stream_writer():
+                yield payload                             #   already {"type": "thought"|"token", ...}
+                continue
+
+            # mode == "updates": one dict per desk that just finished
+            if "__interrupt__" in payload:                # case froze at the gate
+                yield {"type": "approval",
+                       "request": payload["__interrupt__"][0].value,
+                       "thread_id": thread_id}
+                return
+
+            for node_updates in payload.values():
+                for entry in (node_updates or {}).get("scratchpad", []):
+                    yield {"type": "trace", "entry": entry}
+                if (node_updates or {}).get("answer") is not None:
+                    answer = node_updates["answer"]       # verdict — hold for the end
+
+        if self._memory and answer:                       # same filing rule as _package()
+            self._memory.add_turn("assistant", answer)
+        yield {"type": "done", "answer": answer, "thread_id": thread_id}
+
+    def start_stream(self, question: str, thread_id: str | None = None) -> Iterator[dict]:
+        """start(), but narrated live. Same memory bookkeeping, same freeze behavior."""
+        thread_id = thread_id or uuid.uuid4().hex
+        context = self._memory.build_context(question) if self._memory else ""
+        if self._memory:
+            self._memory.add_turn("user", question)
+        initial: AgentState = {
+            "question": question, "scratchpad": [], "conversation_context": context,
+            "pending_action": None, "answer": None, "iterations": 0,
+        }
+        yield from self._stream_events(initial, thread_id)    # relay the narrator's notes
+
+    def resume_stream(self, thread_id: str, decision) -> Iterator[dict]:
+        """resume(), narrated. May freeze again — client just loops."""
+        yield from self._stream_events(Command(resume=decision), thread_id)

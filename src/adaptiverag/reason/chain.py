@@ -5,6 +5,7 @@ import logging
 from ..retrieve.vector_store import VectorStore, SearchResult
 from ..ingest.embedder import Embedder
 from ..retrieve.query_expander import QueryExpander
+from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +76,29 @@ class RAGChain:
         prompt = self._build_prompt(question, context)
         answer = self.llm_client.generate(prompt)
 
-        sources = [
+        sources = self._package_sources(results)
+
+        return {"answer": answer, "sources": sources}
+    
+    def query_stream(self, question: str, expand: bool = False) -> Iterator[dict]:
+        """Like query(), but narrates: stage notes → evidence → answer piece-by-piece."""
+        yield {"type": "stage", "stage": "retrieving"}            # note 1: "detective is at the archive"
+        results = self.retrieve(question, expand=expand)          # (blocking, but fast)
+        sources = self._package_sources(results)
+        yield {"type": "sources", "sources": sources}             # note 2: evidence slips, before the answer
+
+        prompt = self._build_prompt(question, self._format_context(results))
+        answer_parts: list[str] = []                              # keep a carbon copy as we dictate
+        for piece in self.llm_client.generate_stream(prompt):     # bucket brigade from OpenAI
+            answer_parts.append(piece)
+            yield {"type": "token", "text": piece}                # note 3..n: a few characters each
+
+        yield {"type": "done", "answer": "".join(answer_parts),   # final note: the assembled report,
+               "sources": sources}                                #   so the caller needn't glue tokens
+    
+    def _package_sources(self, results: list[SearchResult]) -> list[dict]:
+        """Turn SearchResults into the citation dicts the UI/API expect."""
+        return [
             {
                 "chunk_id": r.chunk_id,
                 "source": Path(r.metadata.get("source", "unknown")).name,
@@ -87,7 +110,6 @@ class RAGChain:
             }
             for r in results
         ]
-        return {"answer": answer, "sources": sources}
     
     def _format_context(self, results: list[SearchResult]) -> str:
         """Format retrieved chunks into a numbered context string."""
@@ -226,9 +248,8 @@ class MultiStepChain:
 
         return steps
     
-    def _synthesize(self, question: str, steps: list[dict]) -> str:
-        """Phase 3: Combine sub-answers into a coherent final response."""
-        # Format the reasoning trace for the synthesis prompt
+    def _synthesis_prompt(self, question: str, steps: list[dict]) -> str:
+
         evidence_blocks = []
         for i, step in enumerate(steps, 1):
             evidence_blocks.append(
@@ -254,9 +275,25 @@ class MultiStepChain:
             Research findings:
             {evidence}
 
-            Synthesized answer:"""
+            Synthesized answer:"""        
+        return prompt
 
-        return self.llm_client.generate(prompt)
+    
+    def _synthesize(self, question: str, steps: list[dict]) -> str:
+        """Phase 3: Combine sub-answers into a coherent final response."""
+        return self.llm_client.generate(self._synthesis_prompt(question, steps))
+    
+    @staticmethod
+    def _merge_sources(steps: list[dict]) -> list[dict]:
+        """All steps' sources, deduped by chunk_id, first-seen order kept."""
+        seen, merged = set(), []
+        for step in steps:
+            for source in step["sources"]:
+                if source["chunk_id"] not in seen:
+                    seen.add(source["chunk_id"])
+                    merged.append(source)
+        return merged
+    
 
     def query(self, question: str, expand: bool = False) -> dict:
         """Run the full decompose → answer → synthesize cycle.
@@ -278,13 +315,7 @@ class MultiStepChain:
         answer = self._synthesize(question, steps)
 
         # Merge all sources, deduplicate by chunk_id
-        seen_chunks = set()
-        all_sources = []
-        for step in steps:
-            for source in step["sources"]:
-                if source["chunk_id"] not in seen_chunks:
-                    seen_chunks.add(source["chunk_id"])
-                    all_sources.append(source)
+        all_sources = self._merge_sources(steps)
 
         logger.info(
             "MultiStepChain complete: %d sub-questions, %d unique sources",
@@ -296,3 +327,28 @@ class MultiStepChain:
             "sources": all_sources,
             "reasoning_steps": steps,
         }
+    
+    def query_stream(self, question: str, expand: bool = False) -> Iterator[dict]:
+        """Narrated version: the Analyst thinks out loud, then dictates the synthesis."""
+        yield {"type": "stage", "stage": "decomposing"}               # "breaking your question apart..."
+        sub_questions = self._decompose(question)
+
+        steps = []
+        for i, sub_q in enumerate(sub_questions, 1):
+            yield {"type": "stage", "stage": "sub_question",          # "working on 2 of 3: ..."
+                   "index": i, "total": len(sub_questions), "text": sub_q}
+            result = self.rag_chain.query(sub_q, expand=expand)       # non-stream: internal legwork
+            steps.append({"sub_question": sub_q, "answer": result["answer"],
+                          "sources": result["sources"]})
+
+        sources = self._merge_sources(steps)
+        yield {"type": "sources", "sources": sources}
+
+        yield {"type": "stage", "stage": "synthesizing"}              # "writing the final report..."
+        parts: list[str] = []
+        for piece in self.llm_client.generate_stream(self._synthesis_prompt(question, steps)):
+            parts.append(piece)
+            yield {"type": "token", "text": piece}                    # only the FINAL answer streams
+
+        yield {"type": "done", "answer": "".join(parts),
+               "sources": sources, "reasoning_steps": steps}
