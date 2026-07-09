@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from adaptiverag.api.main import app
+from adaptiverag.api.auth import RateLimiter
 from adaptiverag.reason.router import QueryRoute
 
 # ── the fake staff ──────────────────────────────────────────────────────────
@@ -87,10 +88,20 @@ def client():
         grounding_validator=FakeValidator(),
         ingest=SimpleNamespace(ingest=lambda d: {"files_processed": 1, "total_chunks": 3,
                                                  "corpus_summary": "test docs"}),
+        vector_store=SimpleNamespace(count=lambda: 0),       # empty archive → caps never trip here
         agent_executor=FakeAgent(), supervisor_agent=None,   # None → 503 path testable
     )
     app.state.conversations = {}                     # fresh cabinet per test
-    return TestClient(app)                           # NO `with` → lifespan never runs
+    # Block 4.2: lifespan never runs (no `with`), so hand-place the doorman's
+    # equipment on the shelf too — same trick as the fake staff above.
+    app.state.settings = SimpleNamespace(auth=SimpleNamespace(
+        enabled=True, rate_limit_per_minute=10_000,  # tally so generous it never trips
+        max_upload_mb=20, max_total_chunks=50_000))
+    app.state.api_keys = {"gold-test": "admin"}
+    app.state.rate_limiter = RateLimiter(10_000)
+    c = TestClient(app)                              # NO `with` → lifespan never runs
+    c.headers["X-API-Key"] = "gold-test"             # every test flashes the gold card
+    return c
 
 def sse_events(response) -> list[dict]:
     """Unframe an SSE body back into event dicts (inverse of routes._sse)."""

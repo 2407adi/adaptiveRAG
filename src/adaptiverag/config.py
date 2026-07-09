@@ -164,6 +164,25 @@ class ToolsConfig:
 
 
 @dataclass
+class AuthConfig:
+    enabled: bool = True                # master switch — false = doorman off duty (local dev)
+    rate_limit_per_minute: int = 30     # per-key tally budget → 429 past it
+    max_upload_mb: int = 20             # the dock scale: single-file cap → 413
+    max_total_chunks: int = 50_000      # the archive ceiling: global store cap → 507
+    keys: dict = field(default_factory=dict)   # SECRET — filled from env by load_settings, NEVER from YAML
+
+
+def _parse_api_keys(raw: str) -> dict[str, str]:
+    """'key1:admin,key2:user' → {'key1': 'admin', 'key2': 'user'}."""
+    keys: dict[str, str] = {}
+    for pair in raw.split(","):
+        if ":" in pair:
+            key, role = pair.strip().rsplit(":", 1)   # rsplit: keys may contain ':'
+            keys[key.strip()] = role.strip().lower()
+    return keys
+
+
+@dataclass
 class Settings:
     llm: LLMConfig = field(default_factory=LLMConfig)
     embeddings: EmbeddingsConfig = field(default_factory=EmbeddingsConfig)
@@ -175,6 +194,7 @@ class Settings:
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)   # the detective's house rules
     memory: MemoryConfig = field(default_factory=MemoryConfig)   # conversation-memory dials
+    auth: AuthConfig = field(default_factory=AuthConfig)   # Block 4.2: cards, tally, caps
 
 
 def load_settings() -> Settings:
@@ -202,6 +222,10 @@ def load_settings() -> Settings:
         tools=ToolsConfig(**cfg.get("tools", {})),
         agent=AgentConfig(**cfg.get("agent", {})),   # pull the `agent:` YAML block, fall back to defaults
         memory=MemoryConfig(**cfg.get("memory", {})),   # pull the `memory:` YAML block, fall back to defaults
+        auth=AuthConfig(
+            **cfg.get("auth", {}),                       # non-secret dials from YAML
+            keys=_parse_api_keys(os.getenv("ADAPTIVERAG_API_KEYS", "")),   # cards from .env — same split as AzureConfig
+        ),
     )
 
 

@@ -6,8 +6,10 @@ from collections.abc import Iterator
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
+
+from adaptiverag.api.auth import require_api_key, require_role
 
 from adaptiverag.api.models import (
     QueryRequest, QueryResponse, Source, GroundingReport,
@@ -19,10 +21,13 @@ from adaptiverag.api.models import (
 from adaptiverag.reason.router import QueryRoute
 
 
-router = APIRouter()
+# Two routers now: `public` has no doorman (Azure's probe carries no card);
+# `router` gets the doorman ONCE, and every window on it inherits him.
+public = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
-@router.get("/health")
+@public.get("/health")
 def health() -> dict:
     # The "we're open" light. Azure pings this to know the container is alive.
     return {"status": "ok"}
@@ -62,14 +67,28 @@ def query(req: QueryRequest, request: Request) -> QueryResponse:
     )
 
 
-@router.post("/ingest", response_model=IngestResponse)
+@router.post("/ingest", response_model=IngestResponse,
+             dependencies=[Depends(require_role("admin"))])   # the stricter doorman: gold cards only
 def ingest(request: Request, files: list[UploadFile] = File(...)) -> IngestResponse:
     # The drop-off window: visitor hands over documents, gets a receipt.
     pipe = request.app.state.pipeline
+    cfg = request.app.state.settings.auth
+
+    # The archive ceiling: gold cards go public for demos, so the CAP — not the
+    # role — is what actually protects the store. Applies to everyone, admin too.
+    if pipe.vector_store.count() >= cfg.max_total_chunks:
+        raise HTTPException(status_code=507,             # Insufficient Storage
+                            detail="document store is full; ingestion is closed")
+
+    max_bytes = cfg.max_upload_mb * 1024 * 1024
     with tempfile.TemporaryDirectory() as tmpdir:        # a loading dock that self-demolishes
         for f in files:
+            content = f.file.read()
+            if len(content) > max_bytes:                 # the dock scale: weigh every package
+                raise HTTPException(status_code=413,     # Payload Too Large
+                                    detail=f"{f.filename}: exceeds {cfg.max_upload_mb} MB upload limit")
             name = Path(f.filename or "upload.bin").name   # unnamed file? give it a boring name
-            (Path(tmpdir) / name).write_bytes(f.file.read())
+            (Path(tmpdir) / name).write_bytes(content)
         stats = pipe.ingest.ingest(tmpdir)               # loader→chunker→embedder→Chroma, unchanged
     return IngestResponse(**stats)                       # dock demolished; chunks live in Chroma
 

@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from adaptiverag.config import load_settings
 from adaptiverag.pipeline import wire_pipeline
 from adaptiverag.api import routes
+from adaptiverag.api.auth import RateLimiter
 
 
 @asynccontextmanager
@@ -21,6 +22,8 @@ async def lifespan(app: FastAPI):
     )
     app.state.settings = settings
     app.state.conversations = {}                     # cabinet of clipboards: conversation_id → ConversationMemory
+    app.state.api_keys = settings.auth.keys          # the card register (from .env, via load_settings)
+    app.state.rate_limiter = RateLimiter(settings.auth.rate_limit_per_minute)   # one shared tally counter
     yield                                            # ---- doors open; serve visitors ----
     # ---- closing: nothing to release yet (Chroma persists itself) ----
 
@@ -34,7 +37,8 @@ app.add_middleware(                                  # the "visitors welcome" si
     allow_headers=["*"],
 )
 
-app.include_router(routes.router)
+app.include_router(routes.public)                    # /health — no doorman (Azure probes)
+app.include_router(routes.router)                    # everything else — doorman on duty
 
 
 @app.exception_handler(Exception)
