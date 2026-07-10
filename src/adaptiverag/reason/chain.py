@@ -28,18 +28,21 @@ class RAGChain:
         self.hybrid_retriever = hybrid_retriever   # None → dense-only
 
 
-    def _search(self, query: str, k: int) -> list[SearchResult]:
+    def _search(self, query: str, k: int,
+                scopes: list[str] | None = None) -> list[SearchResult]:
         """One retrieval call: hybrid if a HybridRetriever was injected,
         else dense-only. Keeps retrieve() agnostic to which is active —
         the factory picks based on settings.retrieval.mode.
+        `scopes` = the guest list (Block 4.2b); None = no filter, old behaviour.
         """
         if self.hybrid_retriever is not None:
-            return self.hybrid_retriever.search(query, k=k)
+            return self.hybrid_retriever.search(query, k=k, scopes=scopes)
         return self.vector_store.search_by_text(
-            query_text=query, k=k, embed_fn=self.embedder.embed,
+            query_text=query, k=k, embed_fn=self.embedder.embed, scopes=scopes,
         )
 
-    def retrieve(self, question: str, expand: bool = False) -> list[SearchResult]:
+    def retrieve(self, question: str, expand: bool = False,
+                 scopes: list[str] | None = None) -> list[SearchResult]:
         """Retrieve the chunks for a question — no LLM, no answer.
 
         This is the whole evidence-gathering half of the pipeline:
@@ -50,13 +53,13 @@ class RAGChain:
         # fetch fetch_k candidates so it has a real shortlist to reorder.
         retrieve_k = self.fetch_k if self.reranker else self.top_k
 
-        # 1. Always search with the original query
-        original_results: list[SearchResult] = self._search(question, retrieve_k)
+        # 1. Always search with the original query (guest list rides along)
+        original_results: list[SearchResult] = self._search(question, retrieve_k, scopes=scopes)
 
         # 1b. If expansion is on, also search with the rewritten query and merge
         if expand and self.query_expander:
             expanded_query = self.query_expander.expand(question)
-            expanded_results: list[SearchResult] = self._search(expanded_query, retrieve_k)
+            expanded_results: list[SearchResult] = self._search(expanded_query, retrieve_k, scopes=scopes)
             results = self._merge_results(original_results, expanded_results, limit=retrieve_k)
         else:
             results = original_results
@@ -67,9 +70,10 @@ class RAGChain:
 
         return results
 
-    def query(self, question: str, expand: bool = False) -> dict:
+    def query(self, question: str, expand: bool = False,
+              scopes: list[str] | None = None) -> dict:
         # Evidence half — extracted so the agent can reuse it.
-        results = self.retrieve(question, expand=expand)
+        results = self.retrieve(question, expand=expand, scopes=scopes)
 
         # Generation half — format → prompt → LLM → package sources.
         context = self._format_context(results)
@@ -80,10 +84,11 @@ class RAGChain:
 
         return {"answer": answer, "sources": sources}
     
-    def query_stream(self, question: str, expand: bool = False) -> Iterator[dict]:
+    def query_stream(self, question: str, expand: bool = False,
+                     scopes: list[str] | None = None) -> Iterator[dict]:
         """Like query(), but narrates: stage notes → evidence → answer piece-by-piece."""
         yield {"type": "stage", "stage": "retrieving"}            # note 1: "detective is at the archive"
-        results = self.retrieve(question, expand=expand)          # (blocking, but fast)
+        results = self.retrieve(question, expand=expand, scopes=scopes)  # (blocking, but fast)
         sources = self._package_sources(results)
         yield {"type": "sources", "sources": sources}             # note 2: evidence slips, before the answer
 
@@ -225,7 +230,8 @@ class MultiStepChain:
         return [original_question]
     
     def _answer_sub_questions(self, sub_questions: list[str],
-                              expand: bool = False) -> list[dict]:
+                              expand: bool = False,
+                              scopes: list[str] | None = None) -> list[dict]:
         """Phase 2: Answer each sub-question independently via RAG.
 
         Returns a list of step dicts, each containing:
@@ -238,7 +244,7 @@ class MultiStepChain:
             logger.info("Answering sub-question %d/%d: %s",
                         i, len(sub_questions), sub_q)
 
-            result = self.rag_chain.query(sub_q, expand=expand)
+            result = self.rag_chain.query(sub_q, expand=expand, scopes=scopes)
 
             steps.append({
                 "sub_question": sub_q,
@@ -295,12 +301,14 @@ class MultiStepChain:
         return merged
     
 
-    def query(self, question: str, expand: bool = False) -> dict:
+    def query(self, question: str, expand: bool = False,
+              scopes: list[str] | None = None) -> dict:
         """Run the full decompose → answer → synthesize cycle.
 
         Args:
             question: The user's complex question.
             expand:   If True, use query expansion on each sub-question.
+            scopes:   Guest list (Block 4.2b); every sub-question inherits it.
 
         Returns:
             dict with 'answer' (str), 'sources' (list), and 'reasoning_steps' (list)
@@ -308,8 +316,8 @@ class MultiStepChain:
         # Phase 1: Decompose
         sub_questions = self._decompose(question)
 
-        # Phase 2: Answer each sub-question via RAG
-        steps = self._answer_sub_questions(sub_questions, expand=expand)
+        # Phase 2: Answer each sub-question via RAG (same guest list each time)
+        steps = self._answer_sub_questions(sub_questions, expand=expand, scopes=scopes)
 
         # Phase 3: Synthesize
         answer = self._synthesize(question, steps)
@@ -328,7 +336,8 @@ class MultiStepChain:
             "reasoning_steps": steps,
         }
     
-    def query_stream(self, question: str, expand: bool = False) -> Iterator[dict]:
+    def query_stream(self, question: str, expand: bool = False,
+                     scopes: list[str] | None = None) -> Iterator[dict]:
         """Narrated version: the Analyst thinks out loud, then dictates the synthesis."""
         yield {"type": "stage", "stage": "decomposing"}               # "breaking your question apart..."
         sub_questions = self._decompose(question)
@@ -337,7 +346,7 @@ class MultiStepChain:
         for i, sub_q in enumerate(sub_questions, 1):
             yield {"type": "stage", "stage": "sub_question",          # "working on 2 of 3: ..."
                    "index": i, "total": len(sub_questions), "text": sub_q}
-            result = self.rag_chain.query(sub_q, expand=expand)       # non-stream: internal legwork
+            result = self.rag_chain.query(sub_q, expand=expand, scopes=scopes)  # non-stream: internal legwork
             steps.append({"sub_question": sub_q, "answer": result["answer"],
                           "sources": result["sources"]})
 

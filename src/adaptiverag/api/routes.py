@@ -6,10 +6,13 @@ from collections.abc import Iterator
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from adaptiverag.api.auth import require_api_key, require_role
+from adaptiverag.scope import (          # Block 4.2b: stamps + guest lists
+    SHARED_SCOPE, chat_scope, scopes_for, current_scopes,
+)
 
 from adaptiverag.api.models import (
     QueryRequest, QueryResponse, Source, GroundingReport,
@@ -47,7 +50,9 @@ def query(req: QueryRequest, request: Request) -> QueryResponse:
         return QueryResponse(answer=answer, route=route.value, conversation_id=conv_id)
     
     chain = pipe.multi_step_chain if route == QueryRoute.MULTI_STEP else pipe.rag_chain
-    result = chain.query(req.question, expand=req.expand)
+    # 4.2b: guest list = public shelf + THIS chat's locker. A fresh ticket
+    # (new conv_id) means a fresh, empty locker — new chats see only `shared`.
+    result = chain.query(req.question, expand=req.expand, scopes=scopes_for(conv_id))
 
     g = pipe.grounding_validator.validate(result["answer"], result["sources"])  # Auditor stamps it
     
@@ -69,7 +74,11 @@ def query(req: QueryRequest, request: Request) -> QueryResponse:
 
 @router.post("/ingest", response_model=IngestResponse,
              dependencies=[Depends(require_role("admin"))])   # the stricter doorman: gold cards only
-def ingest(request: Request, files: list[UploadFile] = File(...)) -> IngestResponse:
+def ingest(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    conversation_id: str | None = Form(None),    # 4.2b: which locker? None = public shelf
+) -> IngestResponse:
     # The drop-off window: visitor hands over documents, gets a receipt.
     pipe = request.app.state.pipeline
     cfg = request.app.state.settings.auth
@@ -89,7 +98,10 @@ def ingest(request: Request, files: list[UploadFile] = File(...)) -> IngestRespo
                                     detail=f"{f.filename}: exceeds {cfg.max_upload_mb} MB upload limit")
             name = Path(f.filename or "upload.bin").name   # unnamed file? give it a boring name
             (Path(tmpdir) / name).write_bytes(content)
-        stats = pipe.ingest.ingest(tmpdir)               # loader→chunker→embedder→Chroma, unchanged
+        # 4.2b: the clerk's ink stamp — a conversation_id means these books go
+        # into that chat's locker; without one they land on the public shelf.
+        scope = chat_scope(conversation_id) if conversation_id else SHARED_SCOPE
+        stats = pipe.ingest.ingest(tmpdir, scope=scope)  # loader→chunker→embedder→Chroma, now stamped
     return IngestResponse(**stats)                       # dock demolished; chunks live in Chroma
 
 
@@ -136,7 +148,8 @@ def chat_stream(req: QueryRequest, request: Request) -> StreamingResponse:
             else:
                 chain = pipe.multi_step_chain if route == QueryRoute.MULTI_STEP else pipe.rag_chain
                 final: dict = {}
-                for event in chain.query_stream(req.question, expand=req.expand):
+                for event in chain.query_stream(req.question, expand=req.expand,
+                                                scopes=scopes_for(conv_id)):  # 4.2b guest list
                     if event["type"] == "done":
                         final = event                    # keep for grounding; don't forward —
                     else:                                #   WE decide when it's truly done
@@ -182,10 +195,25 @@ def _pick_agent(request: Request, supervisor: bool):
     return agent
 
 
+def _scoped(events: Iterator[dict], scopes: list[str] | None) -> Iterator[dict]:
+    # 4.2b, streaming-only subtlety: Starlette pulls each event of a sync
+    # generator in a FRESH context copy, so pinning the guest list once up
+    # front would be forgotten by the second pull. Re-pin it inside every
+    # pull, so whatever tool call fires during next(events) sees the list.
+    while True:
+        current_scopes.set(scopes)               # pin the guest list for THIS pull
+        try:
+            event = next(events)                 # agent may call search_documents in here
+        except StopIteration:
+            return
+        yield event
+
+
 @router.post("/agent/start", response_model=AgentResponse)
 def agent_start(req: AgentStartRequest, request: Request) -> AgentResponse:
     # Open a case. Returns either the verdict, or a frozen case + claim ticket.
     agent = _pick_agent(request, req.supervisor)
+    current_scopes.set(scopes_for(req.conversation_id))   # 4.2b: pin the guest list for this case
     return _agent_envelope(agent.start(req.question))
 
 
@@ -193,6 +221,7 @@ def agent_start(req: AgentStartRequest, request: Request) -> AgentResponse:
 def agent_resume(req: AgentResumeRequest, request: Request) -> AgentResponse:
     # Visitor returns with the claim ticket and a decision; the case thaws mid-step.
     agent = _pick_agent(request, req.supervisor)
+    current_scopes.set(scopes_for(req.conversation_id))   # 4.2b: same guest list on thaw
     decision = {"approved": req.approved, "reason": req.reason} if req.reason else req.approved
     return _agent_envelope(agent.resume(req.thread_id, decision))
 
@@ -201,10 +230,11 @@ def agent_start_stream(req: AgentStartRequest, request: Request) -> StreamingRes
     # Open a case with live narration. Stream ends at done OR at a freeze —
     # the approval event carries the thread_id, so the client can come back.
     agent = _pick_agent(request, req.supervisor)
+    scopes = scopes_for(req.conversation_id)              # 4.2b guest list
 
     def notes() -> Iterator[str]:
         try:
-            for event in agent.start_stream(req.question):
+            for event in _scoped(agent.start_stream(req.question), scopes):
                 yield _sse(event)
         except Exception as exc:
             yield _sse({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})
@@ -216,11 +246,12 @@ def agent_start_stream(req: AgentStartRequest, request: Request) -> StreamingRes
 def agent_resume_stream(req: AgentResumeRequest, request: Request) -> StreamingResponse:
     # Return with the ticket + decision; narration picks up mid-case.
     agent = _pick_agent(request, req.supervisor)
+    scopes = scopes_for(req.conversation_id)              # 4.2b guest list
     decision = {"approved": req.approved, "reason": req.reason} if req.reason else req.approved
 
     def notes() -> Iterator[str]:
         try:
-            for event in agent.resume_stream(req.thread_id, decision):
+            for event in _scoped(agent.resume_stream(req.thread_id, decision), scopes):
                 yield _sse(event)
         except Exception as exc:
             yield _sse({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})

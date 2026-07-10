@@ -21,7 +21,7 @@ def _make_mock_rag_chain(answers: dict[str, str] | None = None):
     answers = answers or {}
     mock = MagicMock(spec=RAGChain)
 
-    def fake_query(question, expand=False):
+    def fake_query(question, expand=False, scopes=None):   # scopes: Block 4.2b passthrough
         for keyword, answer_text in answers.items():
             if keyword.lower() in question.lower():
                 return {

@@ -36,11 +36,11 @@ class FakeLLM:
 
 
 class FakeChain:                                     # serves as both RAG and MultiStep fake
-    def query(self, q, expand=False):
+    def query(self, q, expand=False, scopes=None):   # scopes: Block 4.2b guest list
         return {"answer": "grounded answer", "sources": [SOURCE],
                 "reasoning_steps": [{"sub_question": "sq1", "answer": "a1", "sources": [SOURCE]}]}
 
-    def query_stream(self, q, expand=False):
+    def query_stream(self, q, expand=False, scopes=None):
         yield {"type": "stage", "stage": "retrieving"}
         yield {"type": "sources", "sources": [SOURCE]}
         yield {"type": "token", "text": "grounded "}
@@ -86,8 +86,8 @@ def client():
         router=FakeRouter(), llm_client=FakeLLM(),
         rag_chain=FakeChain(), multi_step_chain=FakeChain(),
         grounding_validator=FakeValidator(),
-        ingest=SimpleNamespace(ingest=lambda d: {"files_processed": 1, "total_chunks": 3,
-                                                 "corpus_summary": "test docs"}),
+        ingest=SimpleNamespace(ingest=lambda d, scope="shared": {"files_processed": 1, "total_chunks": 3,
+                                                                 "corpus_summary": "test docs"}),
         vector_store=SimpleNamespace(count=lambda: 0),       # empty archive → caps never trip here
         agent_executor=FakeAgent(), supervisor_agent=None,   # None → 503 path testable
     )

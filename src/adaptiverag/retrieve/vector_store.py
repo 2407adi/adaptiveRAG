@@ -3,7 +3,9 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
-
+from chromadb.api.types import Where   # Chroma's official type recipe for filters
+import chromadb
+from typing import cast
 
 @dataclass
 class StoredChunk:
@@ -33,7 +35,7 @@ class VectorStore(ABC):
 
     @abstractmethod
     def search(
-        self, query_vector: list[float], k: int = 5
+        self, query_vector: list[float], k: int = 5, scopes: list[str] | None = None
     ) -> list[SearchResult]:
         """Find k most similar chunks by vector."""
         ...
@@ -42,13 +44,13 @@ class VectorStore(ABC):
         self,
         query_text: str,
         k: int = 5,
-        embed_fn: Optional[Callable[[str], list[float]]] = None,
+        embed_fn: Optional[Callable[[str], list[float]]] = None, scopes: list[str] | None = None
     ) -> list[SearchResult]:
         """Convenience: embed text then search."""
         if embed_fn is None:
             raise ValueError("embed_fn required for text search")
         vector = embed_fn(query_text)
-        return self.search(vector, k)
+        return self.search(vector, k, scopes)
 
     @abstractmethod
     def delete(self, ids: list[str]) -> None:
@@ -82,10 +84,7 @@ class VectorStore(ABC):
         ...
 
 
-"""ChromaStore — append this to vector_store.py"""
 
-import chromadb
-from typing import cast
 
 class ChromaStore(VectorStore):
     """ChromaDB-backed vector store. Zero-config, local."""
@@ -122,13 +121,24 @@ class ChromaStore(VectorStore):
             )
 
     def search(
-        self, query_vector: list[float], k: int = 5
+        self, query_vector: list[float], k: int = 5, scopes: list[str] | None = None,
     ) -> list[SearchResult]:
+        
+        where: Where | None = (
+    cast(Where, {"scope": {"$in": scopes}}) if scopes else None
+)
+
+        n_results = min(k, self._collection.count())
+        if n_results == 0:   # empty collection: Chroma refuses "top 0" — return empty-handed
+            return []
+
         results = self._collection.query(
-            query_embeddings=[query_vector],
-            n_results=min(k, self._collection.count()),
-            include=["distances", "documents", "metadatas"],
-        )
+        query_embeddings=[query_vector],
+        n_results=n_results,
+        where=where,   # ← librarian checks stamps BEFORE fetching:
+                       #   true pre-filter, only in-scope books compete
+        include=["distances", "documents", "metadatas"],
+    )
         if not results["ids"][0]:
             return []
 
@@ -255,7 +265,8 @@ class FAISSStore(VectorStore):
             self._metadatas[c.id] = c.metadata or {}
 
     def search(
-        self, query_vector: list[float], k: int = 5
+        self, query_vector: list[float], k: int = 5,
+        scopes: list[str] | None = None,
     ) -> list[SearchResult]:
         if self._index.ntotal == 0:
             return []
@@ -263,14 +274,20 @@ class FAISSStore(VectorStore):
         query = np.array([query_vector], dtype=np.float32)
         query = self._normalize(query)
 
-        k = min(k, self._index.ntotal)
-        scores, int_ids = self._index.search(query, k)  # type: ignore[call-arg]
+        # FAISS only ever shows us a truncated top-N — we can't see the
+        # whole line like BM25. So with a guest list, cast a wider net
+        # (5x) and let the bouncer thin it out below.
+        fetch_k = min(k * 5 if scopes else k, self._index.ntotal)
+        scores, int_ids = self._index.search(query, fetch_k)  # type: ignore[call-arg]
 
         results = []
         for score, int_id in zip(scores[0], int_ids[0]):
             if int_id == -1:  # FAISS returns -1 for empty slots
                 continue
             str_id = self._int_to_str[int(int_id)]
+            # the bouncer: wrong stamp (or no stamp) → not seated
+            if scopes and self._metadatas.get(str_id, {}).get("scope") not in scopes:
+                continue
             results.append(
                 SearchResult(
                     chunk_id=str_id,
@@ -279,6 +296,8 @@ class FAISSStore(VectorStore):
                     metadata=self._metadatas.get(str_id, {}),
                 )
             )
+            if len(results) == k:  # k valid guests seated → done
+                break
         return results
     
     def get_all(self) -> list[StoredChunk]:

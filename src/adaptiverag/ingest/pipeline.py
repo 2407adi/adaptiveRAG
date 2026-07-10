@@ -28,7 +28,7 @@ class IngestPipeline:
         self.summarizer = summarizer
         self.bm25 = bm25       # None → dense-only pipeline, no keyword index
 
-    def ingest(self, source_path: str) -> dict:
+    def ingest(self, source_path: str, scope: str = "shared") -> dict:
         """Process all documents in a directory and index them."""
         # Fix 1: use load_directory — it handles unsupported files gracefully
         documents = self.loader.load_directory(source_path)
@@ -56,6 +56,7 @@ class IngestPipeline:
                                 **chunk.metadata,
                                 "source": chunk.doc_id,
                                 "chunk_index": chunk.chunk_index,
+                                "scope": scope,
                             },
                         ))
 

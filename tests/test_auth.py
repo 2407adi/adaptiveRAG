@@ -26,8 +26,8 @@ def make_client(enabled=True, per_minute=10_000, max_upload_mb=1,
         router=SimpleNamespace(classify=lambda q: SimpleNamespace(route=QueryRoute.DIRECT)),
         llm_client=SimpleNamespace(generate=lambda p: "direct answer"),
         vector_store=SimpleNamespace(count=lambda: store_count),   # dial the archive fill level
-        ingest=SimpleNamespace(ingest=lambda d: {"files_processed": 1, "total_chunks": 1,
-                                                 "corpus_summary": "test"}),
+        ingest=SimpleNamespace(ingest=lambda d, scope="shared": {"files_processed": 1, "total_chunks": 1,
+                                                                 "corpus_summary": "test"}),
     )
     return TestClient(app)          # NO `with` → lifespan never runs; we staffed it by hand
 

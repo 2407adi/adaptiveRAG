@@ -59,6 +59,7 @@ class AgentStartRequest(BaseModel):
     # Form to open a new case at the agent window.
     question: str = Field(min_length=1)
     supervisor: bool = False                     # False = lone detective, True = the Chief's firm
+    conversation_id: str | None = None           # 4.2b: scopes search_documents to this chat's docs
 
 
 class AgentResumeRequest(BaseModel):
@@ -67,6 +68,7 @@ class AgentResumeRequest(BaseModel):
     approved: bool
     reason: str | None = None                    # optional note ("denied: don't run code")
     supervisor: bool = False                     # must match start() — resume the SAME desk
+    conversation_id: str | None = None           # 4.2b: must match start() — same guest list on thaw
 
 
 class ApprovalRequest(BaseModel):

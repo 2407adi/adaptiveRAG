@@ -146,6 +146,7 @@ def make_run_python(timeout: float = 5.0, cpu_seconds: int = 2,
 
 
 from pathlib import Path        # lets us turn a long file path into just its filename
+from ..scope import current_scopes   # Block 4.2b: the ambient guest list set per-request by the API
 
 def make_search_documents(rag_chain) -> Callable:
     """Factory: hire a librarian who already knows where the archive is.
@@ -160,7 +161,14 @@ def make_search_documents(rag_chain) -> Callable:
         query. Returns the most relevant chunks, each labeled with its source."""
         # `rag_chain` below isn't a parameter — it's REMEMBERED from the factory
         # (the closure). That's why the boss only ever supplies `query`.
-        results = rag_chain.retrieve(query)          # go to the known archive, pull the most relevant passages
+        #
+        # Block 4.2b: the guest list is AMBIENT, not an argument — the boss (LLM)
+        # must never see or invent a scope. The API layer pins the list to the
+        # request context; we read it here at call time. None = unscoped (dev/tests),
+        # and we call retrieve() the old one-arg way so duck-typed fakes still fit.
+        scopes = current_scopes.get()
+        results = (rag_chain.retrieve(query, scopes=scopes) if scopes
+                   else rag_chain.retrieve(query))   # pull the most relevant IN-SCOPE passages
 
         if not results:                             # archive had nothing on this topic
             return "No relevant passages found."

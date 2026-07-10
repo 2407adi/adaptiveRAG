@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from rank_bm25 import BM25Okapi
 
-from adaptiverag.retrieve.vector_store import StoredChunk, SearchResult
 from adaptiverag.retrieve.vector_store import StoredChunk, SearchResult, VectorStore
 from adaptiverag.ingest.embedder import Embedder
 
@@ -32,30 +31,36 @@ class BM25Retriever:
         self._index = BM25Okapi(self._tokenised_corpus)
 
     # ---- search ----
-    def search(self, query: str, k: int = 5) -> list[SearchResult]:
+    def search(
+        self, query: str, k: int = 5,
+        scopes: list[str] | None = None,   # same guest list as the librarian
+    ) -> list[SearchResult]:
         if self._index is None or len(self._chunks) == 0:
             return []
 
         tokens = self._tokenise(query)
         scores = self._index.get_scores(tokens)
 
-        ranked = sorted(
-            enumerate(scores), key=lambda x: x[1], reverse=True
-        )[:k]
+        # sort the ENTIRE line — no [:k] here anymore. The bouncer must be
+        # allowed to walk past rejected guests to find k valid ones.
+        ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
 
         results = []
         for idx, score in ranked:
             if score <= 0:
                 continue
             chunk = self._chunks[idx]
-            results.append(
-                SearchResult(
-                    chunk_id=chunk.id,
-                    text=chunk.text,
-                    score=float(score),
-                    metadata=chunk.metadata,
-                )
-            )
+            # the bouncer: wrong stamp (or no stamp) → not seated
+            if scopes and chunk.metadata.get("scope") not in scopes:
+                continue
+            results.append(SearchResult(
+                chunk_id=chunk.id,
+                text=chunk.text,
+                score=float(score),
+                metadata=chunk.metadata,
+            ))
+            if len(results) == k:   # k valid guests seated → done
+                break
         return results
     
 class HybridRetriever:
@@ -77,10 +82,12 @@ class HybridRetriever:
         self.weight_dense = weight_dense
         self.weight_sparse = weight_sparse
 
-    def search(self, query: str, k: int = 5) -> list[SearchResult]:
+    def search(self, query: str, k: int = 5, scopes: list[str] | None = None,) -> list[SearchResult]:
         # 1. get results from both retrievers
-        dense_results = self.vector_store.search_by_text(query, k=k * 2, embed_fn=self.embedder.embed)
-        sparse_results = self.bm25.search(query, k=k * 2)
+        dense_results = self.vector_store.search_by_text(
+        query, k=k * 2, embed_fn=self.embedder.embed, scopes=scopes
+    )
+        sparse_results = self.bm25.search(query, k=k * 2, scopes=scopes)
 
         # 2. build rank maps: chunk_id -> rank (1-based)
         dense_ranks = {
