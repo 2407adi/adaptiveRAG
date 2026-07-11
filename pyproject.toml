@@ -50,6 +50,9 @@ where = ["src"]               # setuptools' mailbox: where installable packages 
 target-version = "py311"      # ruff's own mailbox, separate label
 src = ["src", "tests"]        # note: ruff's key is `src`, not `where`
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]   
+
 [tool.ruff.lint.per-file-ignores]
 # ui/app.py MUST import after its sys.path.insert() hack (that's what makes
 # `import adaptiverag` findable from the ui/ folder) — exempt it from E402.
