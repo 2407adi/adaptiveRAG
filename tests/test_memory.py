@@ -1,4 +1,3 @@
-
 # tests/test_memory.py
 """Consolidated tests for Block 3.3 — conversation memory (buffer + vector).
 
@@ -7,6 +6,9 @@ the embedder is a deterministic bag-of-keywords fake, so recall ordering is
 predictable without a model download. The logic tests use an in-memory fake
 VectorStore; the ONE persistence test uses a real ChromaStore on a temp dir,
 because "survives a restart" is a real-backend behaviour worth exercising.
+
+Block 4.3a appends the notebook-rack drills (MemoryManager): per-conversation
+isolation — the offline version of the ZANZIBAR probe.
 """
 
 import math
@@ -14,7 +16,7 @@ import math
 import pytest
 
 from adaptiverag.agents.memory import (
-    Turn, BufferMemory, VectorMemory, ConversationMemory,
+    Turn, BufferMemory, VectorMemory, ConversationMemory, MemoryManager,
 )
 from adaptiverag.retrieve.vector_store import StoredChunk, SearchResult
 
@@ -195,3 +197,49 @@ def test_long_term_memory_persists_across_sessions(tmp_path):
     store2 = ChromaStore(collection_name="mem", persist_directory=path)
     hits = VectorMemory(_FakeEmbedder(), store2).recall("pricing", k=1)
     assert hits and "pricing" in hits[0].text.lower()
+
+
+# ── Block 4.3a: the notebook rack (MemoryManager) ─────────────────────────────
+def test_rack_isolates_conversations():
+    """The offline ZANZIBAR probe: chat A's secret never reaches chat B's briefing —
+    even though both notebooks share ONE archive (isolation comes from the stamp)."""
+    mgr = MemoryManager(_FakeEmbedder(), _FakeStore())
+    a = mgr.for_conversation("chat-A")
+    b = mgr.for_conversation("chat-B")
+
+    a.add_turn("user", "the secret funding codename is ZANZIBAR-7")
+    a.add_turn("assistant", "Understood, ZANZIBAR-7 noted.")
+
+    assert "ZANZIBAR" not in b.build_context("what is the secret funding codename?")
+    assert "ZANZIBAR" in a.build_context("what is the secret funding codename?")
+
+
+def test_rack_returns_same_notebook_for_same_ticket():
+    """The rack is a cache: same conversation_id → the SAME notebook object,
+    so the clipboard accumulates across requests within a server session."""
+    mgr = MemoryManager(_FakeEmbedder(), _FakeStore())
+    assert mgr.for_conversation("chat-A") is mgr.for_conversation("chat-A")
+    assert mgr.for_conversation("chat-A") is not mgr.for_conversation("chat-B")
+
+
+def test_rack_none_ticket_gets_shared_default_notebook():
+    """No ticket → the shared 'default' notebook (old single-session behavior,
+    kept for Streamlit and bare API calls). Every None caller gets the same one."""
+    mgr = MemoryManager(_FakeEmbedder(), _FakeStore())
+    assert mgr.for_conversation(None) is mgr.for_conversation(None)
+    assert mgr.for_conversation(None) is not mgr.for_conversation("chat-A")
+
+
+def test_rack_shares_one_archive_but_private_clipboards():
+    """Both chats' cards land in the ONE shared cabinet (count proves it), yet
+    each notebook's clipboard holds only its own pages."""
+    store = _FakeStore()
+    mgr = MemoryManager(_FakeEmbedder(), store)
+    mgr.for_conversation("chat-A").add_turn("user", "funding question from A")
+    mgr.for_conversation("chat-B").add_turn("user", "weather question from B")
+
+    assert store.count() == 2                             # one cabinet, both cards
+    a_board = mgr.for_conversation("chat-A")._buffer.as_prompt()
+    b_board = mgr.for_conversation("chat-B")._buffer.as_prompt()
+    assert "funding" in a_board and "weather" not in a_board
+    assert "weather" in b_board and "funding" not in b_board

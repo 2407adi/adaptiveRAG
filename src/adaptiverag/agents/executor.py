@@ -306,9 +306,9 @@ class AgentExecutor:
 
     def __init__(self, llm_client, registry, *,
                  max_iterations: int = 6,
-                 require_approval: list[str] | None = None, memory=None):
+                 require_approval: list[str] | None = None, memory_manager=None):
         self.registry = registry
-        self._memory = memory
+        self._manager = memory_manager
         self.policy = ApprovalPolicy(require_approval or [])   # the warrant house-rule
 
         # Build the three desks (closures, deps baked in — Steps 5/6/7).
@@ -317,6 +317,10 @@ class AgentExecutor:
         self._gate = make_human_gate(self.policy)
 
         self._graph = self._build_graph()                      # assemble + compile once
+
+    def _notebook(self, conversation_id: str | None):
+        """Read the ticket, pull THIS chat's notebook off the rack. No rack → no memory."""
+        return self._manager.for_conversation(conversation_id) if self._manager else None
 
     def _build_graph(self):
         """Draw the flowchart: desks (nodes) joined by arrows (edges)."""
@@ -361,7 +365,7 @@ class AgentExecutor:
     def _config(self, thread_id: str) -> RunnableConfig:
         return {"configurable": {"thread_id": thread_id}}
 
-    def _package(self, state: dict, thread_id: str) -> dict:
+    def _package(self, state: dict, thread_id: str, memory=None) -> dict:
         """Translate LangGraph's raw output into our result shape: paused or done."""
         interrupts = state.get("__interrupt__")
         if interrupts:                                # frozen at the gate — NOT done, don't file anything
@@ -373,8 +377,8 @@ class AgentExecutor:
             }
 
         answer = state.get("answer")
-        if self._memory and answer:                   # verdict reached → clerk files the detective's answer
-            self._memory.add_turn("assistant", answer)
+        if memory and answer:                   # verdict reached → clerk files the detective's answer
+            memory.add_turn("assistant", answer)
 
         return {
             "status": "done",
@@ -383,15 +387,16 @@ class AgentExecutor:
             "thread_id": thread_id,
         }
 
-    def start(self, question: str, thread_id: str | None = None) -> dict:
+    def start(self, question: str, thread_id: str | None = None, conversation_id: str | None = None) -> dict:
         """Open a new case. Runs until the verdict OR the first warrant request."""
         thread_id = thread_id or uuid.uuid4().hex        # a fresh label per case
+        memory = self._notebook(conversation_id)
 
         # Clerk's briefing FIRST (so 'recent' excludes the question we're about to
         # ask), THEN log the client's question into both memory tiers.
-        context = self._memory.build_context(question) if self._memory else ""
-        if self._memory:
-            self._memory.add_turn("user", question)
+        context = memory.build_context(question) if memory else ""
+        if memory:
+            memory.add_turn("user", question)
 
 
         initial: AgentState = {
@@ -399,26 +404,26 @@ class AgentExecutor:
             "pending_action": None, "answer": None, "iterations": 0,
         }
         state = self._graph.invoke(initial, self._config(thread_id))
-        return self._package(state, thread_id)
+        return self._package(state, thread_id, memory)
 
-    def resume(self, thread_id: str, decision) -> dict:
+    def resume(self, thread_id: str, decision, conversation_id: str | None = None) -> dict:
         """Hand the supervisor's decision to the frozen case and continue. May
         pause AGAIN if the detective's next move also needs a warrant."""
         state = self._graph.invoke(Command(resume=decision), self._config(thread_id))
-        return self._package(state, thread_id)
+        return self._package(state, thread_id, self._notebook(conversation_id))
 
-    def run(self, question: str, approver=None) -> dict:
+    def run(self, question: str, approver=None, conversation_id: str | None = None) -> dict:
         """Drive a whole case to completion, auto-answering each warrant via
         approver(request) -> decision. Default approves everything. Great for
         tests / non-interactive callers; the UI uses start()+resume() directly."""
         approver = approver or (lambda request: True)
-        result = self.start(question)
+        result = self.start(question, conversation_id=conversation_id)
         while result["status"] == "awaiting_approval":   # keep going as long as it keeps stopping
             decision = approver(result["request"])
-            result = self.resume(result["thread_id"], decision)
+            result = self.resume(result["thread_id"], decision, conversation_id=conversation_id)
         return result
     
-    def _stream_events(self, graph_input, thread_id: str) -> Iterator[dict]:
+    def _stream_events(self, graph_input, thread_id: str, memory=None) -> Iterator[dict]:
         """Shared narrator for start/resume: desk updates AND live dictation."""
         answer = None
         for item in self._graph.stream(                   # two channels → (mode, payload) tuples
@@ -443,22 +448,24 @@ class AgentExecutor:
                 if (node_updates or {}).get("answer") is not None:
                     answer = node_updates["answer"]       # verdict — hold for the end
 
-        if self._memory and answer:                       # same filing rule as _package()
-            self._memory.add_turn("assistant", answer)
+        if memory and answer:                       # same filing rule as _package()
+           memory.add_turn("assistant", answer)
         yield {"type": "done", "answer": answer, "thread_id": thread_id}
 
-    def start_stream(self, question: str, thread_id: str | None = None) -> Iterator[dict]:
+    def start_stream(self, question: str, thread_id: str | None = None, conversation_id: str | None = None) -> Iterator[dict]:
         """start(), but narrated live. Same memory bookkeeping, same freeze behavior."""
         thread_id = thread_id or uuid.uuid4().hex
-        context = self._memory.build_context(question) if self._memory else ""
-        if self._memory:
-            self._memory.add_turn("user", question)
+        memory = self._notebook(conversation_id)
+        context = memory.build_context(question) if memory else ""
+        if memory:
+            memory.add_turn("user", question)
         initial: AgentState = {
             "question": question, "scratchpad": [], "conversation_context": context,
             "pending_action": None, "answer": None, "iterations": 0,
         }
-        yield from self._stream_events(initial, thread_id)    # relay the narrator's notes
+        yield from self._stream_events(initial, thread_id, memory)    # relay the narrator's notes
 
-    def resume_stream(self, thread_id: str, decision) -> Iterator[dict]:
+    def resume_stream(self, thread_id: str, decision, conversation_id: str | None = None) -> Iterator[dict]:
         """resume(), narrated. May freeze again — client just loops."""
-        yield from self._stream_events(Command(resume=decision), thread_id)
+        memory = self._notebook(conversation_id)
+        yield from self._stream_events(Command(resume=decision), thread_id, memory)

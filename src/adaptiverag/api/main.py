@@ -9,6 +9,7 @@ from adaptiverag.config import load_settings
 from adaptiverag.pipeline import wire_pipeline
 from adaptiverag.api import routes
 from adaptiverag.api.auth import RateLimiter
+from adaptiverag.api.store import ConversationStore   # the ledger cabinet
 
 
 @asynccontextmanager
@@ -21,7 +22,9 @@ async def lifespan(app: FastAPI):
         persist_directory="data/chroma",
     )
     app.state.settings = settings
-    app.state.conversations = {}                     # cabinet of clipboards: conversation_id → ConversationMemory
+    # 4.3a: the whiteboard (in-RAM dict, wiped nightly) is retired. The ledger
+    # cabinet lives in data/ — same room as Chroma, same Docker volume later.
+    app.state.store = ConversationStore("data/conversations.db")
     app.state.api_keys = settings.auth.keys          # the card register (from .env, via load_settings)
     app.state.rate_limiter = RateLimiter(settings.auth.rate_limit_per_minute)   # one shared tally counter
     yield                                            # ---- doors open; serve visitors ----

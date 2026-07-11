@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from adaptiverag.api.main import app
 from adaptiverag.api.auth import RateLimiter
+from adaptiverag.api.store import ConversationStore
 from adaptiverag.reason.router import QueryRoute
 
 # ── the fake staff ──────────────────────────────────────────────────────────
@@ -28,6 +29,8 @@ class FakeRouter:
 
 class FakeLLM:
     def generate(self, prompt):
+        if "Name this conversation" in prompt:        # the auto-titler's request
+            return "A Tidy Title"
         return "direct answer"
 
     def generate_stream(self, prompt):
@@ -57,23 +60,24 @@ class FakeValidator:
 
 
 class FakeAgent:
-    """Freezes on the first start(); completes on resume(). Stream twins match."""
-    def start(self, question, thread_id=None):
+    """Freezes on the first start(); completes on resume(). Stream twins match.
+    4.3a: accepts (and ignores) conversation_id — must match the real calling shape."""
+    def start(self, question, thread_id=None, conversation_id=None):
         return {"status": "awaiting_approval", "thread_id": "T1", "answer": None,
                 "trace": [{"type": "thought", "content": "hmm"}],
                 "request": {"type": "approval_request", "tool": "run_python",
                             "args": {"code": "2+2"}, "message": "wants to run code"}}
 
-    def resume(self, thread_id, decision):
+    def resume(self, thread_id, decision, conversation_id=None):
         return {"status": "done", "thread_id": thread_id, "answer": "4",
                 "trace": [{"type": "observation", "content": "4"}]}
 
-    def start_stream(self, question, thread_id=None):
+    def start_stream(self, question, thread_id=None, conversation_id=None):
         yield {"type": "thought", "text": "hmm"}
         yield {"type": "approval", "request": {"tool": "run_python", "args": {},
                                                "message": "wants to run code"}, "thread_id": "T1"}
 
-    def resume_stream(self, thread_id, decision):
+    def resume_stream(self, thread_id, decision, conversation_id=None):
         yield {"type": "token", "text": "4"}
         yield {"type": "done", "answer": "4", "thread_id": thread_id}
 
@@ -81,7 +85,7 @@ class FakeAgent:
 # ── the fixture: hand-place the fake staff on the real shelf ────────────────
 
 @pytest.fixture()
-def client():
+def client(tmp_path):                                # tmp_path: pytest's throwaway folder
     app.state.pipeline = SimpleNamespace(
         router=FakeRouter(), llm_client=FakeLLM(),
         rag_chain=FakeChain(), multi_step_chain=FakeChain(),
@@ -91,7 +95,9 @@ def client():
         vector_store=SimpleNamespace(count=lambda: 0),       # empty archive → caps never trip here
         agent_executor=FakeAgent(), supervisor_agent=None,   # None → 503 path testable
     )
-    app.state.conversations = {}                     # fresh cabinet per test
+    # 4.3a: the REAL cabinet on a throwaway file — store logic is window-side,
+    # cheap, and offline, so it needs no faking (unlike the LLM staff above).
+    app.state.store = ConversationStore(tmp_path / "conversations.db")
     # Block 4.2: lifespan never runs (no `with`), so hand-place the doorman's
     # equipment on the shelf too — same trick as the fake staff above.
     app.state.settings = SimpleNamespace(auth=SimpleNamespace(
@@ -187,3 +193,31 @@ def test_agent_stream_freezes_then_resumes(client):
     e2 = sse_events(client.post("/agent/resume/stream",
                                 json={"thread_id": "T1", "approved": True}))
     assert e2[-1]["type"] == "done" and e2[-1]["answer"] == "4"
+
+
+# ── Block 4.3a drills ───────────────────────────────────────────────────────
+
+def test_auto_title_on_first_exchange(client):
+    # First exchange labels the tab; the labeler's reply comes from FakeLLM.
+    conv = client.post("/query", json={"question": "what did Solstice raise?"}).json()["conversation_id"]
+    body = client.get(f"/conversations/{conv}").json()
+    assert body["title"] == "A Tidy Title"
+    # And the sidebar listing carries it too.
+    listing = client.get("/conversations").json()["conversations"]
+    assert any(c["id"] == conv and c["title"] == "A Tidy Title" for c in listing)
+
+
+def test_agent_turns_filed_in_cabinet(client):
+    # Case opens WITH a ticket and freezes → only the question page is filed.
+    r1 = client.post("/agent/start",
+                     json={"question": "run some code", "conversation_id": "agent-chat"}).json()
+    assert r1["status"] == "awaiting_approval"
+    turns = client.get("/conversations/agent-chat").json()["turns"]
+    assert turns == [{"role": "user", "content": "run some code"}]   # no answer page on a freeze
+
+    # Thaw completes the case → the answer page lands, tab gets labeled.
+    client.post("/agent/resume", json={"thread_id": r1["thread_id"], "approved": True,
+                                       "conversation_id": "agent-chat"})
+    body = client.get("/conversations/agent-chat").json()
+    assert body["turns"][-1] == {"role": "assistant", "content": "4"}
+    assert body["title"] == "A Tidy Title"                           # titled at answer time

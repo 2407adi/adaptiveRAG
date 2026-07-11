@@ -209,3 +209,37 @@ class ConversationMemory:
         """New conversation: wipe the clipboard. The on-disk archive is untouched
         (that's the whole point of long-term memory)."""
         self._buffer.clear()
+
+class MemoryManager:
+    """The notebook rack: one ConversationMemory per conversation_id.
+
+    Closes the 4.2b cross-chat leak — chats stop sharing a notebook. One
+    SHARED basement archive (cards are stamped, recall filters by stamp);
+    one PRIVATE clipboard per chat (minted fresh on first request).
+    """
+
+    def __init__(self, embedder, vector_store, *,
+                 max_turns: int = 10, recall_k: int = 3,
+                 recall_score_threshold: float = 0.3):
+        # ONE archivist over ONE cabinet, shared by every notebook — safe because
+        # add() stamps each card and recall() filters by that stamp (Block 3.3 code,
+        # finally used for what it was built for).
+        self._vector = VectorMemory(embedder=embedder, vector_store=vector_store)
+        self._max_turns = max_turns                    # clipboard size for each new notebook
+        self._recall_k = recall_k                      # dials copied onto every notebook
+        self._threshold = recall_score_threshold
+        self._notebooks: dict[str, ConversationMemory] = {}   # the rack itself
+
+    def for_conversation(self, conversation_id: str | None) -> ConversationMemory:
+        """Hand over THIS chat's notebook — bind a fresh one on first visit.
+        No ticket (None) → the shared 'default' notebook (old single-session behavior)."""
+        key = conversation_id or "default"
+        if key not in self._notebooks:                 # first visit: bind a new notebook
+            self._notebooks[key] = ConversationMemory(
+                buffer=BufferMemory(max_turns=self._max_turns),   # PRIVATE clipboard
+                vector=self._vector,                              # SHARED archive
+                recall_k=self._recall_k,
+                recall_score_threshold=self._threshold,
+                conversation_id=key,                   # the stamp that scopes recall
+            )
+        return self._notebooks[key]

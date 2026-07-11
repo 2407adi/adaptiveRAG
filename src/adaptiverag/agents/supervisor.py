@@ -24,6 +24,12 @@ class SupervisorState(TypedDict):
 
     question: str                                    # the case (written once, never changes)
 
+    # 4.3a: the memory clerk's briefing — what THIS conversation already covered
+    # (recency + recall, from the same notebook rack the lone detective uses).
+    # Written once at start(); read by the Chief. Juniors never see it — their
+    # conversation_context slot carries colleagues' reports instead.
+    conversation_context: str
+
     # The stack of pinned reports. Each entry is one junior's finished work:
     #   {"agent": "retriever", "report": "<polished summary for the Chief>",
     #    "trace": [<that junior's private Thought/Action/Observation notepad>]}
@@ -167,9 +173,16 @@ def make_worker_wrapper(name: str, worker_graph):
 _WORKER_NAMES = list(WORKER_PROMPTS)      # ["retriever", "reasoner", "validator"] — one source of truth
 
 
-def _build_supervisor_prompt(question: str, reports: list[dict]) -> str:
-    """The Chief's desk view: the case, his team roster, the reports so far."""
+def _build_supervisor_prompt(question: str, reports: list[dict],
+                             conversation_context: str = "") -> str:
+    """The Chief's desk view: the case, his team roster, the reports so far —
+    and (4.3a) the memory clerk's briefing on what this chat already covered."""
     reports_block = _format_reports(reports) or "(no reports yet)"
+    # Same shape as the lone detective's memory block: only shown when non-empty.
+    memory_block = (
+        f"What you already know from this conversation:\n{conversation_context}\n\n"
+        if conversation_context else ""
+    )
     return f"""You are the supervisor of a team of specialist agents answering a user's question. \
 You never use tools yourself — you only decide who works next, or finish.
 
@@ -187,7 +200,7 @@ Reply EXACTLY in this format:
 Decision: <retriever | reasoner | validator | FINISH>
 Final Answer: <only when Decision is FINISH — the complete answer for the user, grounded in the reports>
 
-User question: {question}
+{memory_block}User question: {question}
 
 {reports_block}
 
@@ -225,7 +238,8 @@ def make_supervisor_node(llm_client, max_handoffs: int = 6):
 
         # Normal turn: the Chief dictates. While deciding, nothing streams
         # (no marker appears); when FINISHing, the closing memo streams live.
-        prompt = _build_supervisor_prompt(state["question"], state["reports"])
+        prompt = _build_supervisor_prompt(state["question"], state["reports"],
+                                          state.get("conversation_context", ""))
         if hasattr(llm_client, "generate_stream"):
             reply = _relay_sections(
                 llm_client.generate_stream(prompt), get_stream_writer(),
@@ -256,8 +270,10 @@ class SupervisorAgent:
     def __init__(self, llm_client, registry, *,
                  max_handoffs: int = 6,            # the Chief's delegation budget
                  worker_iterations: int = 3,       # each junior's private tool budget
-                 require_approval: list[str] | None = None):
+                 require_approval: list[str] | None = None,
+                 memory_manager=None):             # 4.3a: the SAME notebook rack the lone detective uses
         policy = ApprovalPolicy(require_approval or [])   # same house rule, firm-wide
+        self._manager = memory_manager             # None → the firm runs memoryless (old behavior)
 
         self._chief = make_supervisor_node(llm_client, max_handoffs)
         # Three offices + doormen, from the same factories — only the badge differs.
@@ -299,39 +315,53 @@ class SupervisorAgent:
     def _config(self, thread_id: str) -> RunnableConfig:
         return {"configurable": {"thread_id": thread_id}}
 
-    def _package(self, state: dict, thread_id: str) -> dict:
+    def _notebook(self, conversation_id: str | None):
+        """Read the ticket, pull THIS chat's notebook off the rack. No rack → no memory.
+        Same rack as the lone detective — toggle modes mid-chat, the memory follows."""
+        return self._manager.for_conversation(conversation_id) if self._manager else None
+
+    def _package(self, state: dict, thread_id: str, memory=None) -> dict:
         interrupts = state.get("__interrupt__")
         if interrupts:                                    # frozen at some junior's gate
             return {"status": "awaiting_approval",
                     "request": interrupts[0].value,
                     "thread_id": thread_id,
                     "reports": state.get("reports", [])}
+        answer = state.get("answer")
+        if memory and answer:                             # closing memo → file it in THIS chat's notebook
+            memory.add_turn("assistant", answer)
         return {"status": "done",
-                "answer": state.get("answer"),
+                "answer": answer,
                 "reports": state.get("reports", []),      # per-agent report + trace, for the UI panel
                 "thread_id": thread_id}
 
-    def start(self, question: str, thread_id: str | None = None) -> dict:
+    def start(self, question: str, thread_id: str | None = None, conversation_id: str | None = None) -> dict:
         thread_id = thread_id or uuid.uuid4().hex
+        memory = self._notebook(conversation_id)          # 4.3a: pull this chat's notebook
+        context = memory.build_context(question) if memory else ""   # briefing BEFORE filing the question
+        if memory:
+            memory.add_turn("user", question)
         initial: SupervisorState = {
-            "question": question, "reports": [],
+            "question": question, "conversation_context": context,
+            "reports": [],
             "next_agent": None, "answer": None, "handoffs": 0,
         }
-        return self._package(self._graph.invoke(initial, self._config(thread_id)), thread_id)
+        return self._package(self._graph.invoke(initial, self._config(thread_id)), thread_id, memory)
 
-    def resume(self, thread_id: str, decision) -> dict:
+    def resume(self, thread_id: str, decision, conversation_id: str | None = None) -> dict:
         return self._package(
-            self._graph.invoke(Command(resume=decision), self._config(thread_id)), thread_id)
+            self._graph.invoke(Command(resume=decision), self._config(thread_id)), thread_id,
+            self._notebook(conversation_id))              # same ticket → same notebook on thaw
 
-    def run(self, question: str, approver=None) -> dict:
+    def run(self, question: str, approver=None, conversation_id: str | None = None) -> dict:
         approver = approver or (lambda request: True)
-        result = self.start(question)
+        result = self.start(question, conversation_id=conversation_id)
         while result["status"] == "awaiting_approval":
             decision = approver(result["request"])
-            result = self.resume(result["thread_id"], decision)
+            result = self.resume(result["thread_id"], decision, conversation_id=conversation_id)
         return result
     
-    def _stream_events(self, graph_input, thread_id: str) -> Iterator[dict]:
+    def _stream_events(self, graph_input, thread_id: str, memory=None) -> Iterator[dict]:
         """The firm narrated live: handoffs, each junior's thoughts and moves,
         filed reports, and the Chief's closing memo dictated token by token."""
         answer = None
@@ -373,17 +403,25 @@ class SupervisorAgent:
                     for r in nu.get("reports", []):
                         yield {"type": "report", "agent": r["agent"], "report": r["report"]}
 
+        if memory and answer:                             # same filing rule as _package()
+            memory.add_turn("assistant", answer)
         yield {"type": "done", "answer": answer, "thread_id": thread_id}
 
-    def start_stream(self, question: str, thread_id: str | None = None) -> Iterator[dict]:
-        """start(), narrated live."""
+    def start_stream(self, question: str, thread_id: str | None = None, conversation_id: str | None = None) -> Iterator[dict]:
+        """start(), narrated live. Same memory bookkeeping as the non-stream twin."""
         thread_id = thread_id or uuid.uuid4().hex
+        memory = self._notebook(conversation_id)
+        context = memory.build_context(question) if memory else ""
+        if memory:
+            memory.add_turn("user", question)
         initial: SupervisorState = {
-            "question": question, "reports": [],
+            "question": question, "conversation_context": context,
+            "reports": [],
             "next_agent": None, "answer": None, "handoffs": 0,
         }
-        yield from self._stream_events(initial, thread_id)
+        yield from self._stream_events(initial, thread_id, memory)
 
-    def resume_stream(self, thread_id: str, decision) -> Iterator[dict]:
+    def resume_stream(self, thread_id: str, decision, conversation_id: str | None = None) -> Iterator[dict]:
         """resume(), narrated. May freeze again at another gate — client loops."""
-        yield from self._stream_events(Command(resume=decision), thread_id)
+        yield from self._stream_events(Command(resume=decision), thread_id,
+                                       self._notebook(conversation_id))

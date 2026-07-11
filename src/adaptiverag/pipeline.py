@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import os
-import uuid                                  # a per-session conversation id
 
 from .config import Settings
 from .ingest.loader import DocumentLoader
@@ -30,7 +29,7 @@ from .retrieve.hybrid import BM25Retriever, HybridRetriever
 from .agents.tools import build_default_registry, ToolRegistry
 from .agents.executor import AgentExecutor
 from .agents.supervisor import SupervisorAgent
-from .agents.memory import BufferMemory, VectorMemory, ConversationMemory
+from .agents.memory import MemoryManager    # was: BufferMemory, VectorMemory, ConversationMemory
 
 @dataclass
 class Pipeline:
@@ -51,14 +50,14 @@ class Pipeline:
     grounding_validator: GroundingValidator
     tool_registry: ToolRegistry | None = None      # Block 3.1 front desk (shared + audited)
     agent_executor: AgentExecutor | None = None    # Block 3.2 ReAct detective
-    memory: ConversationMemory | None = None        # Block 3.3 conversation-memory clerk
+    memory_manager: MemoryManager | None = None
     supervisor_agent: SupervisorAgent | None = None  # Block 3.4 the firm (Chief + 3 juniors)
 
 
 def wire_pipeline(
     settings: Settings,
     collection_name: str,
-    persist_directory: str | Path,
+    persist_directory: str | Path
 ) -> Pipeline:
     """Build and connect every pipeline component from settings.
 
@@ -159,23 +158,22 @@ def wire_pipeline(
     # 10. Grounding validator (hallucination detection)
     grounding_validator = GroundingValidator(llm_client=llm_client, threshold=0.6)
 
-    # 11. Conversation memory (Block 3.3): short-term buffer + long-term vector
-    #     archive, behind the ConversationMemory clerk. Gated by config. Its OWN
-    #     Chroma collection (separate drawer) in the SAME persist dir, so memory
-    #     cards never mix with document chunks. Reuses the shared embedder.
-    memory = None
+    # 11. Conversation memory (3.3 → 4.3a): the notebook RACK. One shared archive
+    #     (its own Chroma drawer, cards stamped per chat) + one private clipboard
+    #     per conversation, minted on first request. No more session-wide id.
+    memory_manager = None
     if settings.memory.enabled:
         memory_store = create_vector_store(
             backend="chroma",
-            collection_name=settings.memory.collection_name,   # e.g. "conversation_memory"
-            persist_directory=persist_directory,               # same room, different drawer
+            collection_name=settings.memory.collection_name,
+            persist_directory=persist_directory,        # same room, different drawer (unchanged)
         )
-        memory = ConversationMemory(
-            buffer=BufferMemory(max_turns=settings.memory.max_turns),
-            vector=VectorMemory(embedder=embedder, vector_store=memory_store),
+        memory_manager = MemoryManager(
+            embedder=embedder,
+            vector_store=memory_store,
+            max_turns=settings.memory.max_turns,
             recall_k=settings.memory.recall_k,
             recall_score_threshold=settings.memory.recall_score_threshold,
-            conversation_id=uuid.uuid4().hex,   # one id per wired session ≈ one conversation
         )
 
     # Wiring agents pipeline
@@ -193,15 +191,18 @@ def wire_pipeline(
             llm_client, tool_registry,
             max_iterations=settings.agent.max_iterations,
             require_approval=settings.agent.require_approval,
-            memory=memory,        # Block 3.3 — agent reads the briefing + records each turn
+            memory_manager=memory_manager,   # the rack; the detective pulls per-ticket notebooks himself
         )
         # Block 3.4 — the firm. SAME registry (shared audit log), same approval
         # house rule; only the org chart differs. UI toggles between the two.
+        # 4.3a: SAME rack too — toggle modes mid-chat and the memory follows,
+        # because both desks pull the same per-ticket notebook.
         supervisor_agent = SupervisorAgent(
             llm_client, tool_registry,
             max_handoffs=settings.agent.max_handoffs,
             worker_iterations=settings.agent.worker_iterations,
             require_approval=settings.agent.require_approval,
+            memory_manager=memory_manager,
         )
 
     return Pipeline(
@@ -216,6 +217,6 @@ def wire_pipeline(
         grounding_validator=grounding_validator,
         tool_registry=tool_registry,
         agent_executor=agent_executor,
-        memory=memory,
+        memory_manager=memory_manager,
         supervisor_agent=supervisor_agent,
     )
