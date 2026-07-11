@@ -7,19 +7,39 @@ name = "adaptiverag"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "python-dotenv>=1.0",
-    "pyyaml>=6.0",
-    "beautifulsoup4>=4.12",
-    "pypdf>=4.0",
-    "python-docx>=1.1",
+    # ── config & parsing ──────────────────────────────
+    "python-dotenv>=1.0",        # loads .env secrets
+    "pyyaml>=6.0",               # config/default.yaml
+    "pydantic>=2.7",             # API request/response contracts (models.py)
+    # ── document ingestion ────────────────────────────
+    "beautifulsoup4>=4.12",      # HTML extraction
+    "pypdf>=4.0",                # PDF text extraction
+    "python-docx>=1.1",          # .docx extraction
+    "pytesseract>=0.3.10",       # OCR wrapper (needs Tesseract system binary)
+    "pdf2image>=1.16",           # PDF→image for OCR (needs Poppler system binary)
+    # ── retrieval & embeddings ────────────────────────
     "numpy>=1.26",
-    "chromadb>=0.4",
-    "faiss-cpu>=1.7",
-    "sentence-transformers>=2.2",
-    "openai>=1.0",
-    "pytesseract>=0.3.10",
-    "pdf2image>=1.16",
-    "langgraph>=0.2.60",
+    "chromadb>=0.4",             # vector store
+    "faiss-cpu>=1.7",            # dev-only vector backend
+    "sentence-transformers>=2.2", # local embeddings + reranker cross-encoder
+    "rank-bm25>=0.2.2",          # sparse arm of hybrid retrieval
+    # ── LLM & orchestration ───────────────────────────
+    "openai>=1.0",               # Azure OpenAI / OpenAI client
+    "langchain-core>=1.0",       # @tool decorator, message types
+    "langgraph>=1.0",            # agent graphs (executor + supervisor)
+    # ── agent tools ───────────────────────────────────
+    "tavily-python>=0.7",        # web_search tool (degrades gracefully w/o key)
+    # ── API service ───────────────────────────────────
+    "fastapi>=0.115",            # the service layer
+    "uvicorn[standard]>=0.30",   # the server that runs it
+    "python-multipart>=0.0.9",   # /ingest multipart file uploads (Form/File)
+]
+
+[project.optional-dependencies]
+cohere = ["cohere>=5.0"]         # optional rerank backend (config: rerank.backend=cohere)
+dev = [
+    "pytest>=8.0",
+    "streamlit>=1.40",           # local dev harness only — never shipped in the image
 ]
 
 [tool.setuptools.packages.find]

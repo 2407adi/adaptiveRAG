@@ -19,3 +19,4 @@ data/chroma/
 web/node_modules/
 web/dist/
 data/conversations.db
+data/models/

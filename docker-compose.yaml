@@ -1,0 +1,17 @@
+# The site manager's one-page sheet: how to unpack and run the crate.
+# Usage: docker compose up --build
+
+services:
+  adaptiverag:                       # our one and only service (one crate)
+    build: .                         # pack the crate from ./Dockerfile first
+    ports:
+      - "8000:8000"                  # corridor: Mac's door 8000 → crate's door 8000
+    volumes:
+      - ./data:/app/data             # doorway: crate's /app/data IS the repo's ./data
+                                     # (Chroma + conversations.db + audit log + HF models
+                                     #  live on YOUR disk; survive any demolition)
+    env_file:
+      - .env                         # hand secrets through the door at runtime —
+                                     # they were never sealed into the image
+    restart: unless-stopped          # if the agency crashes, stand it back up
+                                     # (unless you stopped it on purpose)

@@ -1,0 +1,22 @@
+# ── secrets: never sealed into a copyable crate ──
+.env
+
+# ── weight: huge and useless to the build ──
+.git
+.venv
+data/
+eval_results/
+web/node_modules/
+docs/
+
+# ── staleness: stage 1 rebuilds this fresh in the workshop ──
+web/dist/
+
+# ── local clutter: caches & editor debris ──
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+.vscode/
+.DS_Store
