@@ -1,0 +1,64 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]            # ONLY changes that actually land in main — never PRs
+
+permissions:
+  contents: read                # may read the blueprints (clone the repo)...
+  packages: write               # ...and stock the warehouse shelf (push to GHCR)
+
+concurrency:
+  group: deploy                 # one shipping crew at a time —
+  cancel-in-progress: false     # a newer merge queues up, never races the current one
+
+env:
+  IMAGE: ghcr.io/2407adi/adaptiverag   # the shelf label (GHCR requires all-lowercase)
+  # Steps can't peek in the safe from an `if:` — so we answer the question here,
+  # where secrets ARE readable, and steps check this note instead.
+  HAS_AZURE: ${{ secrets.AZURE_CREDENTIALS != '' }}
+
+jobs:
+  build-push-deploy:
+    runs-on: ubuntu-latest      # amd64 desk — the cross-build problem from your Mac doesn't exist here
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Show the visitor badge at the warehouse door. github.actor = whoever
+      # triggered the run; the token is the auto-minted, run-scoped credential.
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+    # Buildx = the modern build engine; needed for the layer-locker feature below.
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .                          # build from the repo root — same as `docker build .`
+          push: true                          # shelve it (build AND push in one step)
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha                # restore crate layers from the locker...
+          cache-to: type=gha,mode=max         # ...and store ALL layers back for next time
+
+      # ── Azure hand-off — DORMANT until Block 4.6 puts AZURE_CREDENTIALS in the safe ──
+
+      - name: Azure login
+        if: env.HAS_AZURE == 'true'           # safe empty → politely skip, stay green
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}   # a service-principal JSON — a robot
+                                                    # employee's ID card Azure issues in 4.6
+
+      - name: Deploy to Azure Container Apps
+        if: env.HAS_AZURE == 'true'
+        run: |
+          az containerapp update \
+            --name adaptiverag \
+            --resource-group adaptiverag-rg \
+            --image ${{ env.IMAGE }}:${{ github.sha }}
