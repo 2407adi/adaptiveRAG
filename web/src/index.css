@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+/* Design tokens — the approved mockup palette: neutral blacks + ONE burnt-orange
+   accent; green/amber/red survive only as desaturated semantic colors. */
+@theme {
+  --color-bg: #0f0f0f;
+  --color-bg2: #141414;
+  --color-panel: #1a1a1a;
+  --color-panel2: #222222;
+  --color-panel3: #2a2a2a;
+  --color-line: #2c2c2c;
+  --color-line2: #404040;
+  --color-ink: #ececec;
+  --color-mut: #a0a0a0;
+  --color-dim: #6b6b6b;
+  --color-accent: #e0703a;
+  --color-accent2: #c85a28;
+  --color-ok: #8fae72;
+  --color-warn: #cba35c;
+  --color-bad: #cf7060;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+}
+
+html, body, #root { height: 100%; }
+body { background: var(--color-bg); color: var(--color-ink); }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #333; border-radius: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* streaming caret */
+@keyframes blink { 50% { opacity: 0; } }
+.caret::after {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 15px;
+  margin-left: 2px;
+  background: var(--color-accent);
+  vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+}

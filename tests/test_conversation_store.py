@@ -89,3 +89,60 @@ def test_unknown_conversation_reads_are_calm(store):
     """Reading a folder that never existed: empty list / None, never an exception."""
     assert store.get_turns("ghost") == []
     assert store.get_title("ghost") is None
+
+# ---- browser-local tenancy (owner column, post-4.3b) ----
+
+def test_owner_filtered_listing(store):
+    """Each browser sees ONLY its own drawer; no owner filter = whole cabinet."""
+    store.append_turn("a1", "user", "hi", owner="browser-A")
+    store.append_turn("b1", "user", "yo", owner="browser-B")
+    assert [c["id"] for c in store.list_conversations(owner="browser-A")] == ["a1"]
+    assert [c["id"] for c in store.list_conversations(owner="browser-B")] == ["b1"]
+    assert len(store.list_conversations()) == 2          # unfiltered legacy view
+
+def test_foreign_folder_looks_missing(store):
+    """exists() with an owner: a stranger's folder answers 'no' (routes 404 it)."""
+    store.append_turn("a1", "user", "hi", owner="browser-A")
+    assert store.exists("a1", owner="browser-A") is True
+    assert store.exists("a1", owner="browser-B") is False
+    assert store.exists("a1") is True                    # ownerless check unchanged
+
+def test_first_visitor_owns_the_folder(store):
+    """INSERT OR IGNORE: a second visitor appending to a known id can't steal it."""
+    store.append_turn("a1", "user", "mine", owner="browser-A")
+    store.append_turn("a1", "assistant", "reply", owner="browser-B")  # same folder id
+    assert store.exists("a1", owner="browser-A") is True # stamp unchanged
+    assert store.exists("a1", owner="browser-B") is False
+
+def test_legacy_null_owner_hidden_from_filtered_listing(store):
+    """Pre-tenancy folders (owner NULL) vanish from every filtered sidebar."""
+    store.append_turn("old", "user", "ancient demo chat")            # no owner
+    assert store.list_conversations(owner="browser-A") == []
+    assert [c["id"] for c in store.list_conversations()] == ["old"]
+
+def test_delete_owned_shreds_only_that_drawer(store):
+    store.append_turn("a1", "user", "hi", owner="browser-A")
+    store.append_turn("a2", "user", "hey", owner="browser-A")
+    store.append_turn("b1", "user", "yo", owner="browser-B")
+    assert store.delete_owned("browser-A") == 2
+    assert store.list_conversations(owner="browser-A") == []
+    assert [c["id"] for c in store.list_conversations(owner="browser-B")] == ["b1"]
+    assert store.get_turns("b1") != []                   # B's pages untouched
+
+def test_owner_migration_on_old_cabinet(db_path, monkeypatch):
+    """A DB created BEFORE the owner column gets ALTERed on next boot, not wiped."""
+    import sqlite3
+    conn = sqlite3.connect(db_path)                      # print the OLD ruled columns by hand
+    conn.executescript("""
+        CREATE TABLE conversations (id TEXT PRIMARY KEY, title TEXT, created_at TEXT NOT NULL);
+        CREATE TABLE turns (id INTEGER PRIMARY KEY, conversation_id TEXT NOT NULL
+            REFERENCES conversations(id), role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
+        INSERT INTO conversations VALUES ('legacy', 'Old chat', '2026-01-01');
+    """)
+    conn.commit(); conn.close()
+
+    migrated = ConversationStore(db_path)                # boot on the old file
+    assert migrated.get_title("legacy") == "Old chat"    # nothing lost
+    assert migrated.list_conversations(owner="anyone") == []      # NULL owner stays hidden
+    migrated.append_turn("fresh", "user", "hi", owner="anyone")   # new column usable
+    assert [c["id"] for c in migrated.list_conversations(owner="anyone")] == ["fresh"]

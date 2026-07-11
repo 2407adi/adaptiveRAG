@@ -1,9 +1,11 @@
 """The agency building: constructed once, staffed once, open to the street."""
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from adaptiverag.config import load_settings
 from adaptiverag.pipeline import wire_pipeline
@@ -42,6 +44,14 @@ app.add_middleware(                                  # the "visitors welcome" si
 
 app.include_router(routes.public)                    # /health — no doorman (Azure probes)
 app.include_router(routes.router)                    # everything else — doorman on duty
+
+# 4.3b: the React storefront. `npm run build` in web/ produces web/dist; FastAPI
+# serves it as static files at / — one container, one deploy. API routes were
+# registered ABOVE, so they win; everything else falls through to the SPA.
+# html=True makes "/" serve index.html. Missing dist (backend-only dev) = no mount.
+_web_dist = Path(__file__).resolve().parents[3] / "web" / "dist"
+if _web_dist.is_dir():
+    app.mount("/", StaticFiles(directory=str(_web_dist), html=True), name="web")
 
 
 @app.exception_handler(Exception)

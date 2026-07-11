@@ -16,3 +16,6 @@ data/chroma_eval/
 data/audit/
 docs/
 data/chroma/
+web/node_modules/
+web/dist/
+data/conversations.db

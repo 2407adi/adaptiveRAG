@@ -17,6 +17,8 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (      -- the folder tabs
     id         TEXT PRIMARY KEY,                -- the ticket number (uuid); unique, finds a folder instantly
     title      TEXT,                            -- the tab label; NULL (empty) until the auto-titler writes one
+    owner      TEXT,                            -- whose cabinet drawer this folder sits in (browser client_id);
+                                                --   NULL = legacy/ownerless folder, visible to no filtered listing
     created_at TEXT NOT NULL                    -- when the folder was opened (ISO timestamp, same style as memory.py)
 );
 CREATE TABLE IF NOT EXISTS turns (              -- the pages inside the folders
@@ -40,6 +42,12 @@ class ConversationStore:
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)  # make sure the room exists
         with self._drawer() as conn:                     # first open: print the ruled columns
             conn.executescript(_SCHEMA)                  # executescript = run several statements at once
+            # Migration: cabinets printed before the `owner` column existed get it
+            # stamped on now. Old folders keep owner=NULL (ownerless — hidden from
+            # every filtered sidebar, but still in the cabinet if ever needed).
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(conversations)")}
+            if "owner" not in cols:
+                conn.execute("ALTER TABLE conversations ADD COLUMN owner TEXT")
 
     @contextmanager
     def _drawer(self):
@@ -55,23 +63,37 @@ class ConversationStore:
 
     # ---- write errands (inside ConversationStore) ----
 
-    def create(self, conversation_id: str, title: str | None = None) -> None:
-        """Open a folder for this ticket. Already exists? Do nothing (idempotent)."""
+    def create(self, conversation_id: str, title: str | None = None,
+               owner: str | None = None) -> None:
+        """Open a folder for this ticket. Already exists? Do nothing (idempotent) —
+        including the owner stamp: the FIRST visitor to open a folder owns it."""
         with self._drawer() as conn:
             conn.execute(
-                "INSERT OR IGNORE INTO conversations (id, title, created_at) VALUES (?, ?, ?)",
-                (conversation_id, title, _now()),     # values ride separately — the form boxes
+                "INSERT OR IGNORE INTO conversations (id, title, owner, created_at) VALUES (?, ?, ?, ?)",
+                (conversation_id, title, owner, _now()),  # values ride separately — the form boxes
             )
 
-    def append_turn(self, conversation_id: str, role: str, content: str) -> None:
-        """Add one page to a folder. New ticket? The tab is made first, so a page
-        can never be filed into a folder that doesn't exist (the FOREIGN KEY would refuse)."""
-        self.create(conversation_id)                  # harmless if the folder is already there
+    def append_turn(self, conversation_id: str, role: str, content: str,
+                    owner: str | None = None) -> None:
+        """Add one page to a folder. New ticket? The tab is made first (stamped with
+        the owner), so a page can never be filed into a folder that doesn't exist."""
+        self.create(conversation_id, owner=owner)     # harmless if the folder is already there
         with self._drawer() as conn:
             conn.execute(
                 "INSERT INTO turns (conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)",
                 (conversation_id, role, content, _now()),
             )                                         # note: no `id` — SQLite stamps the page number itself
+
+    def delete_owned(self, owner: str) -> int:
+        """Shred ONE visitor's folders (and every page inside). Returns folder count.
+        Owner is required on purpose — there is no 'shred everything' errand here."""
+        with self._drawer() as conn:
+            conn.execute(
+                "DELETE FROM turns WHERE conversation_id IN "
+                "(SELECT id FROM conversations WHERE owner = ?)", (owner,),
+            )                                         # pages first (FOREIGN KEY points at tabs)
+            cur = conn.execute("DELETE FROM conversations WHERE owner = ?", (owner,))
+            return cur.rowcount                       # how many folders went into the shredder
 
     def set_title(self, conversation_id: str, title: str) -> None:
         """Write the label on ONE folder's tab (the auto-titler calls this once per chat)."""
@@ -83,13 +105,21 @@ class ConversationStore:
 
     # ---- read errands (inside ConversationStore) ----
 
-    def exists(self, conversation_id: str) -> bool:
-        """Is there a folder with this ticket? (routes.py's 404 check.)"""
+    def exists(self, conversation_id: str, owner: str | None = None) -> bool:
+        """Is there a folder with this ticket? (routes.py's 404 check.)
+        With an owner: is there a folder with this ticket IN THAT VISITOR'S drawer?
+        A stranger's folder answers 'no' — indistinguishable from not existing."""
         with self._drawer() as conn:
-            row = conn.execute(
-                "SELECT 1 FROM conversations WHERE id = ?",   # SELECT 1: we only care IF a row exists
-                (conversation_id,),                           # note the comma — a 1-item tuple
-            ).fetchone()                                      # first matching row, or None
+            if owner is None:                                 # legacy callers: no drawer filter
+                row = conn.execute(
+                    "SELECT 1 FROM conversations WHERE id = ?",   # SELECT 1: we only care IF a row exists
+                    (conversation_id,),                           # note the comma — a 1-item tuple
+                ).fetchone()                                      # first matching row, or None
+            else:
+                row = conn.execute(
+                    "SELECT 1 FROM conversations WHERE id = ? AND owner = ?",
+                    (conversation_id, owner),
+                ).fetchone()
         return row is not None
 
     def get_turns(self, conversation_id: str) -> list[dict]:
@@ -111,16 +141,23 @@ class ConversationStore:
             ).fetchone()
         return row["title"] if row else None
 
-    def list_conversations(self) -> list[dict]:
-        """The sidebar list: every folder tab + its page count, newest folder first."""
+    def list_conversations(self, owner: str | None = None) -> list[dict]:
+        """The sidebar list: folder tabs + page counts, newest folder first.
+        With an owner: ONLY that visitor's drawer. Without: the whole cabinet
+        (legacy callers / bare curl). Ownerless (NULL) folders never match a
+        filtered listing — old pre-tenancy chats simply stop appearing."""
+        where = "WHERE c.owner = ?" if owner is not None else ""
+        args: tuple = (owner,) if owner is not None else ()
         with self._drawer() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT c.id, c.title, COUNT(t.id) AS turns     -- tab + counted pages
                 FROM conversations c
                 LEFT JOIN turns t ON t.conversation_id = c.id  -- line pages up next to their tab
+                {where}
                 GROUP BY c.id                                  -- fold back to one row per folder
                 ORDER BY c.created_at DESC                     -- newest chat on top (sidebar order)
-                """
+                """,
+                args,
             ).fetchall()
         return [{"id": r["id"], "title": r["title"], "turns": r["turns"]} for r in rows]

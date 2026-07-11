@@ -28,11 +28,20 @@ from adaptiverag.reason.router import QueryRoute
 public = APIRouter()
 router = APIRouter(dependencies=[Depends(require_api_key)])
 
+def _owner(request: Request) -> str | None:
+    """Browser-local tenancy (post-4.3b): the SPA mints an anonymous client_id
+    into localStorage and sends it as X-Client-Id on every call. It stamps new
+    folders and filters listings — per-BROWSER privacy without a login flow.
+    No header (curl, tests, old clients) → ownerless, unfiltered, old behavior."""
+    return request.headers.get("x-client-id")
+
+
 def _record_exchange(request: Request, conv_id: str, question: str, answer: str) -> None:
     """File one full exchange into the cabinet, then make sure the folder has a tab label."""
     store = request.app.state.store
-    store.append_turn(conv_id, "user", question)          # page 1: what they asked
-    store.append_turn(conv_id, "assistant", answer)       # page 2: what we said
+    owner = _owner(request)
+    store.append_turn(conv_id, "user", question, owner=owner)     # page 1: what they asked
+    store.append_turn(conv_id, "assistant", answer, owner=owner)  # page 2: what we said
     if store.get_title(conv_id) is None:                  # blank tab = first exchange
         _auto_title(request, conv_id, question)
 
@@ -42,7 +51,7 @@ def _record_agent_answer(request: Request, conv_id: str | None, answer: str | No
     if not (conv_id and answer):
         return
     store = request.app.state.store
-    store.append_turn(conv_id, "assistant", answer)
+    store.append_turn(conv_id, "assistant", answer, owner=_owner(request))
     if store.get_title(conv_id) is None:                  # blank tab = this chat's first exchange
         turns = store.get_turns(conv_id)                  # the question page was filed at case-open —
         first_user = next((t["content"] for t in turns if t["role"] == "user"), answer)
@@ -140,18 +149,30 @@ def ingest(
 
 @router.get("/conversations")
 def list_conversations(request: Request) -> dict:
-    # The sidebar list, straight from the ledger — id, title, page count, newest first.
-    return {"conversations": request.app.state.store.list_conversations()}
+    # The sidebar list — with an X-Client-Id, ONLY that browser's drawer.
+    return {"conversations": request.app.state.store.list_conversations(owner=_owner(request))}
 
 
 @router.get("/conversations/{conversation_id}")
 def get_conversation(conversation_id: str, request: Request) -> dict:
     store = request.app.state.store
-    if not store.exists(conversation_id):                 # no such folder
+    # A stranger's folder 404s exactly like a missing one — no drawer-peeking,
+    # and no oracle that reveals which ids exist.
+    if not store.exists(conversation_id, owner=_owner(request)):
         raise HTTPException(status_code=404, detail="unknown conversation_id")
     return {"id": conversation_id,
             "title": store.get_title(conversation_id),    # new: the 4.3b sidebar wants this
             "turns": store.get_turns(conversation_id)}
+
+
+@router.delete("/conversations")
+def clear_conversations(request: Request) -> dict:
+    # "Clear my chats": shreds ONLY the caller's drawer. Deliberately requires a
+    # client id — there is no anonymous 'shred the whole cabinet' button.
+    owner = _owner(request)
+    if not owner:
+        raise HTTPException(status_code=400, detail="X-Client-Id header required")
+    return {"deleted": request.app.state.store.delete_owned(owner)}
 
 
 def _sse(event: dict) -> str:
@@ -244,7 +265,8 @@ def agent_start(req: AgentStartRequest, request: Request) -> AgentResponse:
     agent = _pick_agent(request, req.supervisor)
     current_scopes.set(scopes_for(req.conversation_id))
     if req.conversation_id:                               # question page: filed NOW, certain
-        request.app.state.store.append_turn(req.conversation_id, "user", req.question)
+        request.app.state.store.append_turn(req.conversation_id, "user", req.question,
+                                            owner=_owner(request))
     result = agent.start(req.question, conversation_id=req.conversation_id)   # 4.3a: the ticket
     if result["status"] == "done":                        # frozen case → no answer page yet
         _record_agent_answer(request, req.conversation_id, result.get("answer"))
@@ -272,7 +294,8 @@ def agent_start_stream(req: AgentStartRequest, request: Request) -> StreamingRes
     def notes() -> Iterator[str]:
         try:
             if req.conversation_id:                       # question page at case-open, same as non-stream
-                request.app.state.store.append_turn(req.conversation_id, "user", req.question)
+                request.app.state.store.append_turn(req.conversation_id, "user", req.question,
+                                                    owner=_owner(request))
             for event in _scoped(agent.start_stream(req.question,
                                                     conversation_id=req.conversation_id), scopes):
                 if event.get("type") == "done":           # verdict flowing past → file the answer page
