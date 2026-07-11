@@ -9,8 +9,12 @@ warrant is config-driven (settings.agent.require_approval). See Block 3.2.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from langgraph.types import interrupt   # the call that freezes the graph mid-run
+
+if TYPE_CHECKING:                       # False at runtime → no real import → no circular import
+    from .executor import AgentState    # visible to Pylance only, for annotations below
 
 
 @dataclass
@@ -32,10 +36,6 @@ def _is_approved(decision) -> tuple[bool, str]:
         return decision.strip().lower() in {"y", "yes", "approve", "approved", "true"}, ""
     return bool(decision), ""                       # plain truthy/falsy fallback
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:                       # False at runtime → no real import → no circular import
-    from .executor import AgentState    # visible to Pylance only, for the annotation below
 
 def make_human_gate(policy: ApprovalPolicy):
     """Factory: the SUPERVISOR'S desk. Freezes the case, surfaces the proposed

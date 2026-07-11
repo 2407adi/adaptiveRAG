@@ -1,10 +1,14 @@
 """src/adaptiverag/retrieve/vector_store.py — Base interface"""
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Optional
 from chromadb.api.types import Where   # Chroma's official type recipe for filters
 import chromadb
+import faiss
+import numpy as np
 from typing import cast
 
 @dataclass
@@ -205,13 +209,7 @@ class ChromaStore(VectorStore):
         return self._collection.count()
     
 
-"""FAISSStore — append this to vector_store.py"""
-
-import json
-from pathlib import Path
-
-import faiss
-import numpy as np
+# ── FAISSStore ─────────────────────────────────────────────────────────
 
 
 class FAISSStore(VectorStore):

@@ -3,8 +3,7 @@
 """Tests for MultiStepChain — chain-of-thought reasoning over documents."""
 
 import json
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock
 from adaptiverag.reason.chain import MultiStepChain, RAGChain
 
 
@@ -165,7 +164,6 @@ class TestMultiStepQuery:
         assert len(chunk_ids) == len(set(chunk_ids))  # no duplicates
 
     def test_expand_flag_passes_through(self):
-        sub_qs = ["Sub Q?"]  # will fallback since < 2, but that's fine
         llm = _make_mock_llm(json.dumps(["Sub A?", "Sub B?"]), "Done.")
         rag = _make_mock_rag_chain()
         chain = MultiStepChain(rag_chain=rag, llm_client=llm)

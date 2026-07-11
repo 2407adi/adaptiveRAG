@@ -1,6 +1,6 @@
 import pytest
 from pathlib import Path
-from adaptiverag.ingest import Document, DocumentLoader, UnsupportedFileType
+from adaptiverag.ingest import DocumentLoader, UnsupportedFileType
 
 SAMPLE_DIR = Path("data/sample")
 
@@ -29,9 +29,11 @@ class TestLoadFile:
     def test_load_csv(self, loader):
         docs = loader.load_file(SAMPLE_DIR / "sample.csv")
         assert len(docs) == 1
-        assert "Alice" in docs[0].text
-        assert "name:" in docs[0].text  # key:value format
-        assert docs[0].metadata["row_count"] == 3
+        assert docs[0].metadata["filetype"] == "csv"
+        assert docs[0].metadata["row_count"] > 0
+        # structure, not contents: one "Header: value | ..." line per data row,
+        # so the test survives sample.csv being swapped for a different file
+        assert len(docs[0].text.splitlines()) == docs[0].metadata["row_count"]
 
     def test_load_html(self, loader):
         docs = loader.load_file(SAMPLE_DIR / "sample.html")
@@ -42,9 +44,14 @@ class TestLoadFile:
 
     def test_load_pdf(self, loader):
         docs = loader.load_file(SAMPLE_DIR / "BaselThree.pdf")
-        assert "This document" in docs[0].text
-        assert docs[0].metadata["page"] == 1
-        assert docs[1].metadata["page"] == 2
+        # structure, not contents. NOTE: the extractor SKIPS empty pages
+        # (extractors.py: `if text.strip()`), so page numbers may have gaps —
+        # assert they only ever increase, never that they're consecutive.
+        pages = [d.metadata["page"] for d in docs]
+        assert pages[0] == 1
+        assert pages == sorted(pages)                        # ascending order
+        assert len(docs) <= docs[0].metadata["total_pages"]  # skips allowed
+        assert all(d.text.strip() for d in docs)             # no empty docs survive
 
     def test_load_docx(self, loader):
         docs = loader.load_file(SAMPLE_DIR / "Basel_Introduction.docx")
@@ -80,9 +87,13 @@ class TestLoadDirectory:
 class TestErrorHandling:
     """Test edge cases."""
 
-    def test_unsupported_file_type(self, loader):
+    def test_unsupported_file_type(self, loader, tmp_path):
+        # the file must EXIST — otherwise the loader's file-not-found check
+        # fires first and we never reach the unsupported-type check under test
+        bad_file = tmp_path / "fake.xyz"
+        bad_file.write_text("some content")
         with pytest.raises(UnsupportedFileType) as exc_info:
-            loader.load_file("fake.xyz")
+            loader.load_file(bad_file)
         assert ".xyz" in str(exc_info.value)
 
     def test_file_not_found(self, loader):

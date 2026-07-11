@@ -10,9 +10,14 @@ from __future__ import annotations
 
 import inspect                                  # lets us READ a function's name, docstring, and parameters
 from dataclasses import dataclass
+from pathlib import Path                        # lets us turn a long file path into just its filename
 from typing import Callable, get_type_hints     # get_type_hints reads the type written next to each parameter
 
 from .audit import AuditLog
+# The secure ENGINE from sandbox.py. Aliased so the name doesn't collide with
+# the TOOL named run_python defined further below (engine vs tool).
+from .sandbox import run_python as _sandbox_run_python
+from ..scope import current_scopes              # Block 4.2b: the ambient guest list set per-request by the API
 
 
 # Translation table: Python type → the word the boss (LLM) expects on the card.
@@ -115,11 +120,6 @@ class ToolRegistry:
 
 ## WRITING THE CODE FOR THE THREE TOOLS THAT WE WILL REGISTER IN THE TOOL REGISTRY. THESE TOOLS ARE: 1) run_python, 2) search_documents, 3) web_search
 
-# The secure ENGINE from Step 2. We alias it so the name doesn't collide with
-# the TOOL named run_python defined just below (your earlier question — engine vs tool).
-from .sandbox import run_python as _sandbox_run_python
-
-
 def make_run_python(timeout: float = 5.0, cpu_seconds: int = 2,
                     max_memory_mb: int = 256) -> Callable:
     """Factory: hire the accountant with the agency's house rules (room limits)
@@ -144,9 +144,6 @@ def make_run_python(timeout: float = 5.0, cpu_seconds: int = 2,
 
     return run_python
 
-
-from pathlib import Path        # lets us turn a long file path into just its filename
-from ..scope import current_scopes   # Block 4.2b: the ambient guest list set per-request by the API
 
 def make_search_documents(rag_chain) -> Callable:
     """Factory: hire a librarian who already knows where the archive is.

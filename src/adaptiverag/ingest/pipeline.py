@@ -1,9 +1,7 @@
-from pathlib import Path
 
 from .loader import DocumentLoader
 from .chunker import BaseChunker
 from .embedder import Embedder
-from .models import Document
 from ..retrieve.vector_store import VectorStore, StoredChunk
 from .summarizer import CorpusSummarizer
 from ..retrieve.hybrid import BM25Retriever

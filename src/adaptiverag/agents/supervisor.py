@@ -7,15 +7,19 @@ only their one-page role briefing (system prompt) differs. See CLAUDE.md 3.4.
 from __future__ import annotations
 
 import operator                                      # operator.add = the "append, don't overwrite" rule
+import uuid
 from typing import Annotated, Optional, TypedDict, cast
 from typing import Hashable
 from collections.abc import Iterator
 
 from langgraph.graph import StateGraph, START, END
-from .executor import (AgentState, _build_reason_prompt,
-                       make_reason_node, make_act_node, _section_after,
-                       _relay_sections)
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import Command
 from langgraph.config import get_stream_writer
+from langchain_core.runnables import RunnableConfig
+
+from .executor import (AgentState, make_reason_node, make_act_node, _section_after,
+                       _relay_sections)
 from .approval import ApprovalPolicy, make_human_gate
 
 
@@ -255,12 +259,6 @@ def make_supervisor_node(llm_client, max_handoffs: int = 6):
         return {"next_agent": next_agent}                    # dispatch slip — router reads this
 
     return supervisor_node
-
-
-import uuid
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.types import Command
-from langchain_core.runnables import RunnableConfig
 
 
 class SupervisorAgent:

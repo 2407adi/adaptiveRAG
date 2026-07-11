@@ -40,7 +40,17 @@ cohere = ["cohere>=5.0"]         # optional rerank backend (config: rerank.backe
 dev = [
     "pytest>=8.0",
     "streamlit>=1.40",           # local dev harness only — never shipped in the image
+    "ruff>=0.8",
 ]
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src"]               # setuptools' mailbox: where installable packages live
+
+[tool.ruff]
+target-version = "py311"      # ruff's own mailbox, separate label
+src = ["src", "tests"]        # note: ruff's key is `src`, not `where`
+
+[tool.ruff.lint.per-file-ignores]
+# ui/app.py MUST import after its sys.path.insert() hack (that's what makes
+# `import adaptiverag` findable from the ui/ folder) — exempt it from E402.
+"ui/app.py" = ["E402"]

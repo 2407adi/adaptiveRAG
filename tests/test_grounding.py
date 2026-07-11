@@ -4,8 +4,6 @@ import pytest
 from unittest.mock import MagicMock
 from adaptiverag.reason.grounding import (
     ClaimStatus,
-    ClaimVerdict,
-    GroundingResult,
     GroundingValidator,
 )
 

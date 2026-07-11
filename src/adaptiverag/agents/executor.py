@@ -7,7 +7,7 @@ any risky move. State machine built on LangGraph. See CLAUDE.md Block 3.2.
 from __future__ import annotations
 
 import operator
-from typing import Annotated, Any, Optional, TypedDict, cast
+from typing import Annotated, Optional, TypedDict, cast
 import json   # json.dumps turns a Python dict into a JSON string for the prompt
 from dataclasses import dataclass
 from collections.abc import Iterator

@@ -7,6 +7,7 @@ keeps the best `top_n`. See CLAUDE.md Block 2.5 for the why.
 
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
 
 from adaptiverag.retrieve.vector_store import SearchResult
@@ -99,8 +100,6 @@ class CrossEncoderReranker(Reranker):
         # 4. Sort by the new score, highest first; keep top_n.
         reranked.sort(key=lambda x: x.score, reverse=True)
         return reranked[:top_n]
-    
-import os
 
 
 class CohereReranker(Reranker):
