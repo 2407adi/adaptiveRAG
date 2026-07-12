@@ -12,7 +12,15 @@ from pathlib import Path
 import os
 import sys
 
-THRESHOLD = 0.05          # the noise-vs-news line: >5% relative drop = regression
+DEFAULT_THRESHOLD = 0.05  # the noise-vs-news line: >5% relative drop = regression
+
+# Per-metric overrides. router_accuracy moves in coarse steps — 25 samples means
+# each flipped routing decision is a full 4-point step, so a 5% line lets ONE
+# coin-flip sample nearly trip the alarm. It gets a two-flip allowance instead.
+# The averaged LLM-judged metrics vary smoothly and keep the tight default.
+THRESHOLDS = {
+    "router_accuracy": 0.10,
+}
 
 
 def load_per_metric(path: str | Path) -> dict:
@@ -21,14 +29,20 @@ def load_per_metric(path: str | Path) -> dict:
     return summary["per_metric"]           # {metric: {"n":…, "mean":…, "min":…, "max":…}}
 
 
-def compare(baseline: dict, current: dict, threshold: float = THRESHOLD) -> list[dict]:
-    """One row of verdict per metric the two scorecards share."""
+def compare(baseline: dict, current: dict,
+            thresholds: dict[str, float] | None = None) -> list[dict]:
+    """One row of verdict per metric the two scorecards share.
+
+    Each metric is judged against its own tolerance: THRESHOLDS override
+    when present, DEFAULT_THRESHOLD otherwise."""
+    thresholds = thresholds if thresholds is not None else THRESHOLDS
     rows = []
     for metric, base in baseline.items():
+        threshold = thresholds.get(metric, DEFAULT_THRESHOLD)
         cur = current.get(metric)
         if cur is None:                    # metric missing today (e.g. errored samples)
-            rows.append({"metric": metric, "baseline": base["mean"],
-                         "current": None, "delta": None, "regressed": True})
+            rows.append({"metric": metric, "baseline": base["mean"], "current": None,
+                         "delta": None, "threshold": threshold, "regressed": True})
             continue                       # missing = treated as a failure, not ignored
         base_mean, cur_mean = base["mean"], cur["mean"]
         if base_mean == 0:                 # can't divide by zero — fall back to absolute drop
@@ -36,7 +50,8 @@ def compare(baseline: dict, current: dict, threshold: float = THRESHOLD) -> list
         else:
             delta = (cur_mean - base_mean) / base_mean       # RELATIVE change (the key idea)
         rows.append({"metric": metric, "baseline": base_mean, "current": cur_mean,
-                     "delta": delta, "regressed": delta < -threshold})
+                     "delta": delta, "threshold": threshold,
+                     "regressed": delta < -threshold})
     return rows
 
 
@@ -45,15 +60,17 @@ def to_markdown(rows: list[dict]) -> str:
     """The human-facing scorecard — a markdown table for GitHub's bulletin board."""
     lines = ["## Eval regression report",
              "",
-             "| Metric | Baseline | Current | Change | Verdict |",
-             "|---|---|---|---|---|"]
+             "| Metric | Baseline | Current | Change | Tolerance | Verdict |",
+             "|---|---|---|---|---|---|"]
     for r in rows:
+        tol = f"-{r['threshold']:.0%}"                         # e.g. '-5%' / '-10%'
         if r["current"] is None:
-            lines.append(f"| {r['metric']} | {r['baseline']:.3f} | — | — | REGRESSED (metric missing) |")
+            lines.append(f"| {r['metric']} | {r['baseline']:.3f} | — | — | {tol} "
+                         f"| REGRESSED (metric missing) |")
             continue
         verdict = "REGRESSED" if r["regressed"] else "OK"
         lines.append(f"| {r['metric']} | {r['baseline']:.3f} | {r['current']:.3f} "
-                     f"| {r['delta']:+.1%} | {verdict} |")     # +.1% → e.g. '+3.2%' / '-7.4%'
+                     f"| {r['delta']:+.1%} | {tol} | {verdict} |")   # +.1% → e.g. '-7.4%'
     return "\n".join(lines)
 
 

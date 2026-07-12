@@ -2,7 +2,7 @@ name: Eval
 
 on:
   schedule:
-    - cron: "0 3 1,15 * *"         # min hour day month weekday → 3:00 UTC, nightly
+    - cron: "0 3 1,15 * *"      # min hour day-of-month month weekday → 3:00 UTC, 1st + 15th
   workflow_dispatch:            # the manual "Run workflow" button (also our test path)
 
 jobs:
@@ -40,6 +40,16 @@ jobs:
         run: python -m adaptiverag.eval.suite
 
       # Reads baseline.json + the scorecard just written (newest = last in sort),
-      # pins the table to the bulletin board, exits 1 on any >5% drop.
+      # pins the table to the bulletin board, exits 1 on any over-threshold drop.
       - name: Compare against baseline
         run: python -m adaptiverag.eval.compare
+
+      # File the fresh scorecard as a downloadable artifact. if: always() means
+      # "even when a previous step failed" — a red gate is EXACTLY when you want
+      # the raw JSON, to inspect it or re-bless it as the new baseline.
+      - name: Upload scorecard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-scorecard
+          path: eval_results/2*.json      # only timestamped runs — never the baseline
