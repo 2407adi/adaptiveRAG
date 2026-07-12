@@ -1,0 +1,45 @@
+name: Eval
+
+on:
+  schedule:
+    - cron: "0 3 1,15 * *"         # min hour day month weekday → 3:00 UTC, nightly
+  workflow_dispatch:            # the manual "Run workflow" button (also our test path)
+
+jobs:
+  eval-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30         # hard leash — a hung run with live keys is a billing problem
+
+    env:                        # the safe opens: same names your local .env uses
+      AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+      AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+      AZURE_OPENAI_DEPLOYMENT: ${{ secrets.AZURE_OPENAI_DEPLOYMENT }}
+      AUDIT_HMAC_KEY: ci-ephemeral-not-a-secret   # audit chain is per-run garbage here —
+                                                  # a real secret would add nothing
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - uses: actions/cache@v4              # same model locker as ci.yaml (reranker needs it)
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-v1
+
+      - name: Install dependencies
+        run: pip install -e .               # runtime staff only — no pytest/ruff tonight
+
+      # Fresh desk → empty eval store → suite auto-ingests the corpus, runs all
+      # 25 samples through the REAL pipeline, saves a timestamped scorecard.
+      - name: Run eval suite
+        run: python -m adaptiverag.eval.suite
+
+      # Reads baseline.json + the scorecard just written (newest = last in sort),
+      # pins the table to the bulletin board, exits 1 on any >5% drop.
+      - name: Compare against baseline
+        run: python -m adaptiverag.eval.compare
