@@ -1,0 +1,48 @@
+name: CI                        # the nameplate — shows on the PR check and the Actions tab
+
+on:                             # the doorbell conditions
+  pull_request:                 # ring on EVERY proposed change (any source branch)
+  push:
+    branches: [main]            # and on every change that lands in main
+
+jobs:
+  lint-and-test:                # one contractor, one rented desk
+    runs-on: ubuntu-latest      # the desk: a fresh, blank amd64 Ubuntu VM, destroyed after
+
+    steps:
+      # The desk starts EMPTY — it doesn't even have your code yet.
+      # checkout is the sub-contractor that clones the repo onto the desk.
+      - uses: actions/checkout@v4
+      # Install Python 3.11 — matching the Docker image, NOT your Mac's 3.13,
+      # because CI should test what production runs.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip                            # locker for downloaded packages...
+          cache-dependency-path: pyproject.toml # ...label = fingerprint of the deps list
+
+      # Locker for the HuggingFace cross-encoder (~90MB): first run downloads,
+      # every later run restores it here in seconds. Same folder HF uses by default.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-models-v1                     # bump to -v2 if you ever switch models
+
+      # System furniture (apt = Ubuntu's package installer; sudo = admin rights,
+      # free on a rented desk). Same two binaries the Dockerfile installs.
+      - name: Install system packages
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr poppler-utils
+
+      # Hire the full dev staff — same command you ran locally.
+      # (Quotes matter: without them, some shells try to expand the [ ].)
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      # Gate 1 — handwriting (~1s). Sloppy? Stamp RED now, skip the expensive part.
+      - name: Lint
+        run: ruff check .
+
+      # Gate 2 — all ~258 drills. First-ever run also downloads the cross-encoder
+      # into the locker; every run after restores it in seconds.
+      - name: Tests
+        run: pytest -q

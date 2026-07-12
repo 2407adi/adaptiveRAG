@@ -128,7 +128,7 @@ def test_every_call_is_logged(registry, tmp_path):
     registry.call("search_documents", {"query": "revenue"})
 
     log_file = tmp_path / "audit.jsonl"
-    lines = [json.loads(l) for l in log_file.read_text().splitlines() if l.strip()]
+    lines = [json.loads(ln) for ln in log_file.read_text().splitlines() if ln.strip()]
 
     assert len(lines) == 2                                   # one page per call, nothing skipped
     assert lines[0]["tool"] == "run_python"

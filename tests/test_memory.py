@@ -13,10 +13,9 @@ isolation — the offline version of the ZANZIBAR probe.
 
 import math
 
-import pytest
 
 from adaptiverag.agents.memory import (
-    Turn, BufferMemory, VectorMemory, ConversationMemory, MemoryManager,
+    BufferMemory, VectorMemory, ConversationMemory, MemoryManager,
 )
 from adaptiverag.retrieve.vector_store import StoredChunk, SearchResult
 

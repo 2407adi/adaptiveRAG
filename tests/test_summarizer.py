@@ -1,6 +1,5 @@
 """Tests for CorpusSummarizer — corpus topic summary generation."""
 
-import pytest
 from unittest.mock import MagicMock
 
 from adaptiverag.ingest.summarizer import CorpusSummarizer

@@ -2,9 +2,8 @@
 
 """Tests for the QueryRouter — LLM-based query classification."""
 
-import pytest
 from unittest.mock import MagicMock
-from adaptiverag.reason.router import QueryRouter, QueryRoute, RouteResult
+from adaptiverag.reason.router import QueryRouter, QueryRoute
 
 
 # ── Sample few-shot examples (same shape as config/default.yaml) ──

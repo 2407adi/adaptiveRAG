@@ -1,6 +1,6 @@
 import pytest
 from adaptiverag.ingest.chunker import (
-    Chunk, FixedChunker, RecursiveChunker, SemanticChunker, get_chunker
+    FixedChunker, RecursiveChunker, SemanticChunker, get_chunker
 )
 
 

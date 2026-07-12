@@ -25,6 +25,20 @@ import json             # how the parent and the locked room pass notes (code in
 import subprocess       # launches a brand-new EMPTY room (fresh interpreter) — not a clone of this crowded one
 from pathlib import Path  # to locate src/ so the fresh room can import just this one light module
 
+# Calculation-only modules we hand to the code directly (no import needed,
+# because __import__ is removed). All pure-compute, no filesystem/network.
+import math
+import statistics
+import random
+import json as _json
+import re as _re
+import datetime as _datetime
+import itertools
+import functools
+import collections
+import decimal
+import fractions
+
 # ── What the sandboxed code is allowed to see ──────────────────────────
 
 # A whitelist of safe builtins. Notably ABSENT: open, __import__, eval, exec,
@@ -40,11 +54,6 @@ _ALLOWED_BUILTINS = {
     )
     if hasattr(_builtins, name)
 }
-
-# Calculation-only modules we hand to the code directly (no import needed,
-# because __import__ is removed). All pure-compute, no filesystem/network.
-import math, statistics, random, json as _json, re as _re, datetime as _datetime
-import itertools, functools, collections, decimal, fractions
 
 _ALLOWED_MODULES = {
     "math": math, "statistics": statistics, "random": random,

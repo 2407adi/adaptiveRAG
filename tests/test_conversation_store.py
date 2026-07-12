@@ -139,7 +139,8 @@ def test_owner_migration_on_old_cabinet(db_path, monkeypatch):
             REFERENCES conversations(id), role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL);
         INSERT INTO conversations VALUES ('legacy', 'Old chat', '2026-01-01');
     """)
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
 
     migrated = ConversationStore(db_path)                # boot on the old file
     assert migrated.get_title("legacy") == "Old chat"    # nothing lost

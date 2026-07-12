@@ -1,7 +1,6 @@
 """tests/test_vector_store.py"""
 
 import tempfile
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -87,7 +86,8 @@ class TestVectorStoreContract:
     def test_search_by_text_with_fn(self, store):
         chunks = _make_chunks(5)
         store.add(chunks)
-        dummy_fn = lambda text: chunks[2].embedding
+        def dummy_fn(text):
+            return chunks[2].embedding
         results = store.search_by_text("anything", k=1, embed_fn=dummy_fn)
         assert results[0].chunk_id == "chunk-2"
 
