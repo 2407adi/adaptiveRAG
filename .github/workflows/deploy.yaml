@@ -60,5 +60,5 @@ jobs:
         run: |
           az containerapp update \
             --name adaptiverag \
-            --resource-group adaptiverag-rg \
+            --resource-group genai-rag-agents-rg \
             --image ${{ env.IMAGE }}:${{ github.sha }}

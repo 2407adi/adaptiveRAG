@@ -26,6 +26,13 @@ const STAGE_LABELS: Record<string, string> = {
   synthesizing: "synthesizing the answer",
 };
 
+/* live status lines — what the app is doing while nothing streams yet */
+const ROUTE_STATUS: Record<string, string> = {
+  direct: "Thinking…",
+  rag: "Searching your documents…",
+  multi_step: "Breaking the question down…",
+};
+
 interface PendingApproval {
   request: ApprovalRequest;
   threadId: string;
@@ -95,21 +102,21 @@ export function useChat() {
     switch (ev.type) {
       case "route":
         adoptId(ev.conversation_id);
-        patchLast((m) => ({ ...m, route: ev.route }));
+        patchLast((m) => ({ ...m, route: ev.route, status: ROUTE_STATUS[ev.route ?? ""] ?? "Working…" }));
         break;
       case "stage":
         if (ev.stage === "sub_question") {
           patchLast((m) => ({ ...m, subQuestions: [...(m.subQuestions ?? []), ev.text ?? ""] }));
         } else {
           const label = STAGE_LABELS[ev.stage ?? ""] ?? ev.stage ?? "";
-          patchLast((m) => ({ ...m, stages: [...(m.stages ?? []), label] }));
+          patchLast((m) => ({ ...m, stages: [...(m.stages ?? []), label], status: `${label}…` }));
         }
         break;
       case "sources":
-        patchLast((m) => ({ ...m, sources: ev.sources }));
+        patchLast((m) => ({ ...m, sources: ev.sources, status: "Writing the answer…" }));
         break;
       case "token":
-        patchLast((m) => ({ ...m, text: m.text + (ev.text ?? "") }));
+        patchLast((m) => ({ ...m, text: m.text + (ev.text ?? ""), status: undefined }));
         break;
       case "grounding":
         patchLast((m) => ({
@@ -141,6 +148,8 @@ export function useChat() {
     convId: string,
   ): Promise<"done" | "frozen"> => {
     for await (const ev of gen) {
+      // any sign of life replaces the "waiting" status line
+      patchLast((m) => (m.status ? { ...m, status: undefined } : m));
       switch (ev.type) {
         case "thought":
           if (supervisor && ev.agent) {
@@ -207,7 +216,7 @@ export function useChat() {
   }, [patchLast, patchWorker]);
 
   const finalize = useCallback(() => {
-    patchLast((m) => ({ ...m, streaming: false, liveThought: "" }));
+    patchLast((m) => ({ ...m, streaming: false, liveThought: "", status: undefined }));
     setBusy(false);
     void refreshList();
   }, [patchLast, refreshList]);
@@ -219,7 +228,11 @@ export function useChat() {
     if (!q || busy) return;
     setBusy(true);
 
-    const placeholder: AssistantMsg = { role: "assistant", kind: mode, text: "", streaming: true };
+    const placeholder: AssistantMsg = {
+      role: "assistant", kind: mode, text: "", streaming: true,
+      status: mode === "chat" ? "Routing the query…"
+        : mode === "sup" ? "Waking the Chief…" : "Opening the case…",
+    };
     setMsgs((ms) => [...ms, { role: "user", text: q }, placeholder]);
 
     try {
@@ -246,7 +259,11 @@ export function useChat() {
     const a = approval;
     if (!a) return;
     setApproval(null);
-    patchLast((m) => ({ ...m, pendingApproval: undefined, denied: approved ? null : (reason || "denied") }));
+    patchLast((m) => ({
+      ...m, pendingApproval: undefined,
+      denied: approved ? null : (reason || "denied"),
+      status: "Resuming the case…",
+    }));
     try {
       const gen = await api.agentResumeStream(a.threadId, approved, reason || null, a.convId, a.supervisor);
       const result = await consumeAgent(gen, a.supervisor, a.convId);

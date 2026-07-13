@@ -99,6 +99,10 @@ export interface AssistantMsg {
   kind: Mode;
   text: string;
   streaming: boolean;
+  /** live "what the app is doing" label, shown with a pulse animation while
+      we wait between phases (routing / searching / verifying…). Cleared the
+      moment real content for that phase arrives. */
+  status?: string;
   route?: string;
   stages?: string[];
   subQuestions?: string[];

@@ -41,6 +41,21 @@ function Panel({ head, children, defaultOpen = true }: {
   );
 }
 
+/* Animated "what's happening" line: pulsing dot + shimmering label.
+   Shown whenever the stream is waiting on the server between phases —
+   replaces the bare blinking cursor that made waits feel broken. */
+function StatusLine({ text }: { text: string }) {
+  return (
+    <div className="flex items-center gap-2 py-0.5 text-[13px] text-mut select-none">
+      <span className="relative flex h-2 w-2 shrink-0">
+        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-60" />
+        <span className="relative inline-flex rounded-full h-2 w-2 bg-accent" />
+      </span>
+      <span className="animate-pulse">{text}</span>
+    </div>
+  );
+}
+
 function Stages({ stages }: { stages: string[] }) {
   return (
     <div className="flex flex-wrap gap-1.5 mb-2.5">
@@ -272,7 +287,10 @@ function AssistantBubble({ m }: { m: AssistantMsg }) {
           <TracePanel trace={m.trace ?? []} liveThought={m.liveThought} pending={Boolean(m.pendingApproval)} denied={m.denied} />
         ) : null}
         {isSup && m.text && <div className="mb-1"><b className="text-accent">Chief's verdict:</b>{" "}</div>}
-        <div className={`whitespace-pre-wrap break-words ${m.streaming && !m.pendingApproval ? "caret" : ""}`}>{m.text}</div>
+        {m.streaming && m.status && !m.pendingApproval && <StatusLine text={m.status} />}
+        {(m.text || !m.streaming) && (
+          <div className={`whitespace-pre-wrap break-words ${m.streaming && !m.pendingApproval && !m.status ? "caret" : ""}`}>{m.text}</div>
+        )}
         {m.sources && m.sources.length > 0 && <SourcesList sources={m.sources} />}
         {m.grounding && <GroundingBadge g={m.grounding} />}
         {m.error && (
