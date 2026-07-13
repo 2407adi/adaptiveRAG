@@ -1,0 +1,299 @@
+id: /subscriptions/459a9792-f45d-4538-ba69-bfc85058ab29/resourceGroups/genai-rag-agents-rg/providers/Microsoft.App/containerapps/adaptiverag
+identity:
+  type: None
+location: Central India
+name: adaptiverag
+properties:
+  configuration:
+    activeRevisionsMode: Single
+    dapr: null
+    identitySettings: []
+    ingress:
+      additionalPortMappings: null
+      allowInsecure: false
+      clientCertificateMode: null
+      corsPolicy: null
+      customDomains: null
+      exposedPort: 0
+      external: true
+      fqdn: adaptiverag.agreeablesmoke-25e3f551.centralindia.azurecontainerapps.io
+      ipSecurityRestrictions: null
+      stickySessions: null
+      targetPort: 8000
+      targetPortHttpScheme: null
+      traffic:
+      - latestRevision: true
+        weight: 100
+      transport: Auto
+    maxInactiveRevisions: 100
+    registries: null
+    revisionTransitionThreshold: null
+    runtime: null
+    secrets:
+    - name: azure-openai-api-key
+    - name: audit-hmac-key
+    - name: tavily-api-key
+    - name: adaptiverag-api-keys
+    service: null
+    targetLabel: ''
+  customDomainVerificationId: 11144DF27F4118668E7AA7373F81E7B9E5C94C4A73F590776ABF8A7AC6BCA20C
+  delegatedIdentities: []
+  environmentId: /subscriptions/459a9792-f45d-4538-ba69-bfc85058ab29/resourceGroups/genai-rag-agents-rg/providers/Microsoft.App/managedEnvironments/adaptiverag-env
+  eventStreamEndpoint: https://centralindia.azurecontainerapps.dev/subscriptions/459a9792-f45d-4538-ba69-bfc85058ab29/resourceGroups/genai-rag-agents-rg/containerApps/adaptiverag/eventstream
+  latestReadyRevisionName: adaptiverag--fwhewyh
+  latestRevisionFqdn: adaptiverag--0000001.agreeablesmoke-25e3f551.centralindia.azurecontainerapps.io
+  latestRevisionName: adaptiverag--0000001
+  managedEnvironmentId: /subscriptions/459a9792-f45d-4538-ba69-bfc85058ab29/resourceGroups/genai-rag-agents-rg/providers/Microsoft.App/managedEnvironments/adaptiverag-env
+  outboundIpAddresses:
+  - 20.204.252.66
+  - 20.204.255.44
+  - 20.207.112.119
+  - 20.204.254.22
+  - 4.213.194.124
+  - 4.213.194.130
+  - 4.213.194.85
+  - 4.213.194.149
+  - 4.213.194.114
+  - 4.213.194.154
+  - 4.247.194.138
+  - 4.187.234.246
+  - 4.187.244.50
+  - 20.244.61.21
+  - 98.70.236.88
+  - 4.224.112.148
+  - 4.187.188.70
+  - 4.187.244.82
+  - 4.224.233.252
+  - 135.235.244.217
+  - 4.224.186.2
+  - 20.235.196.179
+  - 4.224.89.17
+  - 20.244.61.243
+  - 4.247.194.137
+  - 135.235.145.93
+  - 20.244.60.69
+  - 4.224.112.205
+  - 20.235.192.164
+  - 4.247.194.141
+  - 135.235.145.28
+  - 4.187.243.190
+  - 4.187.245.97
+  - 20.235.196.177
+  - 4.187.242.103
+  - 98.70.236.91
+  - 4.187.244.74
+  - 4.224.119.186
+  - 4.224.113.47
+  - 4.247.194.139
+  - 20.235.196.192
+  - 4.224.233.250
+  - 4.224.233.251
+  - 20.244.61.207
+  - 20.244.60.244
+  - 135.235.244.209
+  - 4.224.89.15
+  - 4.224.112.246
+  - 135.235.145.27
+  - 4.187.242.25
+  - 4.187.235.226
+  - 4.247.194.140
+  - 4.224.185.236
+  - 135.235.144.157
+  - 4.187.235.11
+  - 135.235.144.237
+  - 4.224.185.237
+  - 4.224.185.238
+  - 4.224.89.11
+  - 20.244.58.56
+  - 20.235.214.102
+  - 4.224.185.235
+  - 4.224.88.252
+  - 4.224.233.249
+  - 20.235.214.51
+  - 4.224.185.234
+  - 4.187.233.203
+  - 135.235.144.242
+  - 20.244.60.43
+  - 4.224.112.149
+  - 98.70.236.107
+  - 135.235.145.53
+  - 20.235.214.23
+  - 4.247.194.136
+  - 135.235.244.134
+  - 4.224.185.239
+  - 98.70.236.78
+  - 4.224.233.248
+  - 4.224.112.204
+  - 4.224.115.64
+  - 4.187.221.107
+  - 4.224.75.64
+  - 4.224.128.131
+  - 20.235.215.243
+  - 4.188.89.163
+  - 13.71.53.213
+  - 20.219.205.56
+  - 4.224.156.119
+  - 4.224.154.29
+  - 4.186.36.9
+  - 4.224.110.171
+  - 4.187.187.190
+  - 20.235.194.139
+  - 4.224.113.3
+  - 20.235.208.74
+  - 20.235.208.29
+  - 20.204.221.57
+  - 4.224.185.241
+  - 98.70.232.25
+  - 4.224.233.235
+  - 20.207.113.244
+  - 20.207.114.82
+  - 20.207.113.247
+  - 20.207.113.242
+  - 4.188.105.82
+  - 4.213.216.206
+  - 4.188.110.244
+  - 4.186.33.69
+  - 4.186.36.246
+  - 4.186.37.141
+  - 4.187.190.150
+  - 4.224.185.255
+  - 20.235.212.255
+  - 135.235.243.70
+  - 4.247.194.133
+  - 20.235.212.79
+  - 20.244.57.6
+  - 20.235.213.5
+  - 135.235.243.22
+  - 98.70.213.7
+  - 20.219.169.163
+  - 20.219.228.22
+  - 4.247.194.132
+  - 4.187.233.118
+  - 135.235.144.92
+  - 4.224.233.232
+  - 4.247.194.129
+  - 20.235.211.138
+  - 135.235.243.246
+  - 4.224.233.243
+  - 20.235.196.109
+  - 20.219.169.170
+  - 4.224.185.253
+  - 4.224.185.245
+  - 4.187.241.170
+  - 20.235.196.169
+  - 135.235.244.25
+  - 98.70.236.39
+  - 20.219.169.171
+  - 98.70.236.22
+  - 20.219.231.162
+  - 20.235.196.154
+  - 98.70.236.64
+  - 20.219.169.141
+  - 4.224.185.244
+  - 98.70.236.41
+  - 98.70.236.31
+  - 4.187.232.160
+  - 4.247.194.134
+  - 20.235.196.162
+  - 20.235.212.193
+  - 20.235.196.157
+  - 20.235.208.227
+  - 4.187.241.23
+  - 135.235.144.114
+  - 4.224.233.233
+  - 98.70.236.47
+  - 4.224.185.60
+  - 98.70.212.254
+  - 135.235.243.84
+  - 135.235.243.1
+  - 4.224.185.252
+  - 4.224.185.254
+  - 98.70.236.72
+  - 20.219.231.204
+  - 98.70.235.236
+  - 135.235.144.85
+  - 4.224.233.241
+  - 4.247.194.72
+  - 4.247.194.128
+  - 4.187.136.44
+  - 52.140.92.74
+  - 98.70.212.236
+  - 20.219.169.140
+  - 4.187.188.215
+  - 98.70.212.253
+  - 4.187.240.157
+  - 4.247.194.73
+  - 20.235.196.145
+  - 4.187.187.222
+  - 4.247.212.231
+  patchingMode: Automatic
+  provisioningState: Succeeded
+  runningStatus: Running
+  template:
+    containers:
+    - env:
+      - name: HF_HOME
+        value: /tmp/hf-models   # local ephemeral disk — overrides the Dockerfile's
+                                # /app/data/models, which is now a slow network share
+      - name: AZURE_OPENAI_ENDPOINT
+        value: https://adaptiverag-openai.openai.azure.com/
+      - name: AZURE_OPENAI_DEPLOYMENT
+        value: gpt-4o
+      - name: AZURE_OPENAI_API_KEY
+        secretRef: azure-openai-api-key
+        value: ''
+      - name: AUDIT_HMAC_KEY
+        secretRef: audit-hmac-key
+        value: ''
+      - name: TAVILY_API_KEY
+        secretRef: tavily-api-key
+        value: ''
+      - name: ADAPTIVERAG_API_KEYS
+        secretRef: adaptiverag-api-keys
+        value: ''
+      image: ghcr.io/2407adi/adaptiverag:latest
+      imageType: ContainerImage
+      name: adaptiverag
+      resources:
+        cpu: 2.0
+        ephemeralStorage: 8Gi
+        memory: 4Gi
+      probes:
+      - type: Startup
+        tcpSocket:
+          port: 8000
+        periodSeconds: 5        # poke every 5s
+        failureThreshold: 240   # tolerate 20 min of booting (SMB-era insurance)
+        timeoutSeconds: 3
+      volumeMounts:
+      - volumeName: data
+        mountPath: /app/data    # the container's data dir IS the share now
+    volumes:                        # sibling of containers:, inside template:
+      - name: data
+        storageType: AzureFile
+        storageName: adaptiverag-data   # the alias registered in lego 4
+        mountOptions: nobrl             # keep SQLite's file locks client-side —
+                                        # SMB lock handling hangs SQLite/Chroma;
+                                        # safe because max-replicas = 1 (single writer)
+    customMetricsSettings: null
+    initContainers: null
+    revisionSuffix: ''
+    scale:
+      cooldownPeriod: 300
+      maxReplicas: 1
+      minReplicas: 1   # keep one replica alive until go-live is verified;
+                       # flip to 0 for true scale-to-zero afterwards
+      pollingInterval: 30
+      rules: null
+    serviceBinds: null
+    terminationGracePeriodSeconds: null
+  workloadProfileName: Consumption
+resourceGroup: genai-rag-agents-rg
+systemData:
+  createdAt: '2026-07-13T08:37:59.5585875'
+  createdBy: 2407.adi@gmail.com
+  createdByType: User
+  lastModifiedAt: '2026-07-13T08:57:45.4322198'
+  lastModifiedBy: 2407.adi@gmail.com
+  lastModifiedByType: User
+type: Microsoft.App/containerApps

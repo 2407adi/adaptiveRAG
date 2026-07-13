@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 
 from adaptiverag.api.auth import require_api_key, require_role
 from adaptiverag.scope import (          # Block 4.2b: stamps + guest lists
@@ -36,26 +37,46 @@ def _owner(request: Request) -> str | None:
     return request.headers.get("x-client-id")
 
 
-def _record_exchange(request: Request, conv_id: str, question: str, answer: str) -> None:
-    """File one full exchange into the cabinet, then make sure the folder has a tab label."""
+def _record_exchange(request: Request, conv_id: str, question: str, answer: str,
+                     *, make_title: bool = True) -> None:
+    """File one full exchange into the cabinet, then make sure the folder has a tab label.
+    Streaming endpoints pass make_title=False: the titler is an LLM call, and it must
+    never keep the stream open after `done` — they run _ensure_title as a background
+    task once the response has fully closed instead."""
     store = request.app.state.store
     owner = _owner(request)
     store.append_turn(conv_id, "user", question, owner=owner)     # page 1: what they asked
     store.append_turn(conv_id, "assistant", answer, owner=owner)  # page 2: what we said
-    if store.get_title(conv_id) is None:                  # blank tab = first exchange
+    if make_title and store.get_title(conv_id) is None:   # blank tab = first exchange
         _auto_title(request, conv_id, question)
 
-def _record_agent_answer(request: Request, conv_id: str | None, answer: str | None) -> None:
+def _record_agent_answer(request: Request, conv_id: str | None, answer: str | None,
+                         *, make_title: bool = True) -> None:
     """File the verdict page + label the tab. Only called when a case reaches 'done'.
     No ticket or no answer → nothing to file (bare API calls stay folder-less)."""
     if not (conv_id and answer):
         return
     store = request.app.state.store
     store.append_turn(conv_id, "assistant", answer, owner=_owner(request))
-    if store.get_title(conv_id) is None:                  # blank tab = this chat's first exchange
+    if make_title and store.get_title(conv_id) is None:   # blank tab = this chat's first exchange
         turns = store.get_turns(conv_id)                  # the question page was filed at case-open —
         first_user = next((t["content"] for t in turns if t["role"] == "user"), answer)
         _auto_title(request, conv_id, first_user)         # — so read it back for the labeler
+
+
+def _ensure_title(request: Request, conv_id: str | None) -> None:
+    """Background labeling: runs AFTER a stream has closed, so the title LLM call
+    never makes the client stare at a blinking cursor. No folder / no user turn /
+    already titled → quietly does nothing."""
+    if not conv_id:
+        return
+    store = request.app.state.store
+    if store.get_title(conv_id) is not None:
+        return
+    turns = store.get_turns(conv_id)
+    first_user = next((t["content"] for t in turns if t["role"] == "user"), None)
+    if first_user:
+        _auto_title(request, conv_id, first_user)
 
 
 def _auto_title(request: Request, conv_id: str, question: str) -> None:
@@ -215,13 +236,15 @@ def chat_stream(req: QueryRequest, request: Request) -> StreamingResponse:
                             "verdicts": [{"claim": v.claim, "status": v.status.value,
                                           "max_score": v.max_score} for v in g.verdicts]})
 
-            _record_exchange(request, conv_id, req.question, answer)
+            _record_exchange(request, conv_id, req.question, answer,
+                             make_title=False)           # filing is fast; titling is NOT —
             yield _sse({"type": "done", "conversation_id": conv_id})   # ours, after ALL work
 
         except Exception as exc:                         # 200 already sent — errors become a note
             yield _sse({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})
 
-    return StreamingResponse(notes(), media_type="text/event-stream")
+    return StreamingResponse(notes(), media_type="text/event-stream",
+                             background=BackgroundTask(_ensure_title, request, conv_id))
 
 def _agent_envelope(result: dict) -> AgentResponse:
     # Translate executor dict → sealed envelope. One translator for both desks and both endpoints.
@@ -299,12 +322,14 @@ def agent_start_stream(req: AgentStartRequest, request: Request) -> StreamingRes
             for event in _scoped(agent.start_stream(req.question,
                                                     conversation_id=req.conversation_id), scopes):
                 if event.get("type") == "done":           # verdict flowing past → file the answer page
-                    _record_agent_answer(request, req.conversation_id, event.get("answer"))
+                    _record_agent_answer(request, req.conversation_id, event.get("answer"),
+                                         make_title=False)   # titling happens post-close
                 yield _sse(event)
         except Exception as exc:
             yield _sse({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})
 
-    return StreamingResponse(notes(), media_type="text/event-stream")
+    return StreamingResponse(notes(), media_type="text/event-stream",
+                             background=BackgroundTask(_ensure_title, request, req.conversation_id))
 
 
 @router.post("/agent/resume/stream")
@@ -318,9 +343,11 @@ def agent_resume_stream(req: AgentResumeRequest, request: Request) -> StreamingR
         try:
             for event in _scoped(agent.resume_stream(req.thread_id, decision, conversation_id=req.conversation_id), scopes):
                 if event.get("type") == "done":           # verdict flowing past → file the answer page
-                    _record_agent_answer(request, req.conversation_id, event.get("answer"))
+                    _record_agent_answer(request, req.conversation_id, event.get("answer"),
+                                         make_title=False)   # titling happens post-close
                 yield _sse(event)
         except Exception as exc:
             yield _sse({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})
 
-    return StreamingResponse(notes(), media_type="text/event-stream")
+    return StreamingResponse(notes(), media_type="text/event-stream",
+                             background=BackgroundTask(_ensure_title, request, req.conversation_id))
