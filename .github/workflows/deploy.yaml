@@ -3,6 +3,10 @@ name: Deploy
 on:
   push:
     branches: [main]            # ONLY changes that actually land in main — never PRs
+    paths-ignore:               # docs-only merges don't rebuild or redeploy the app
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
 
 permissions:
   contents: read                # may read the blueprints (clone the repo)...
