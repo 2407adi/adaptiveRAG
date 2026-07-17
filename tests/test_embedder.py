@@ -54,9 +54,19 @@ class TestAzureEmbedder:
         assert client.calls[0]["model"] == "my-embed-deploy"
 
 
+def _quota_error():
+    """A properly-constructed RateLimitError — the real SDK requires the
+    httpx response + body kwargs (an over-lenient fake here once let broken
+    tests pass locally and fail in CI)."""
+    import httpx
+    from openai import RateLimitError
+    resp = httpx.Response(429, request=httpx.Request("POST", "http://test"),
+                          json={"error": {"message": "quota exceeded"}})
+    return RateLimitError("quota exceeded", response=resp, body=None)
+
+
 class TestRateLimitPatience:
     def test_retries_then_succeeds(self, monkeypatch):
-        from openai import RateLimitError
         e, client = _azure_embedder(monkeypatch)
         naps: list[int] = []
         monkeypatch.setattr(emb_mod.time, "sleep", lambda s: naps.append(s))
@@ -65,7 +75,7 @@ class TestRateLimitPatience:
         def moody_create(input, model):  # noqa: A002
             if tantrums[0] < 2:
                 tantrums[0] += 1
-                raise RateLimitError("quota exceeded")
+                raise _quota_error()
             return real_create(input=input, model=model)
         client.embeddings.create = moody_create
 
@@ -80,7 +90,7 @@ class TestRateLimitPatience:
         monkeypatch.setattr(emb_mod.time, "sleep", lambda s: None)
 
         def always_429(input, model):  # noqa: A002
-            raise RateLimitError("quota exceeded")
+            raise _quota_error()
         client.embeddings.create = always_429
         with _pytest.raises(RateLimitError):
             e.embed_batch(["a"])          # error surfaces → ingest job reports it
