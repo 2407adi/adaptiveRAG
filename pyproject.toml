@@ -41,6 +41,7 @@ dev = [
     "pytest>=8.0",
     "streamlit>=1.40",           # local dev harness only — never shipped in the image
     "ruff>=0.8",
+    "matplotlib>=3.8",           # Block 5.3: ablation report charts (dev/CI only)
 ]
 
 [tool.setuptools.packages.find]

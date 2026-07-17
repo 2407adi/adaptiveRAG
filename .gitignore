@@ -21,3 +21,9 @@ web/dist/
 data/conversations.db
 data/models/
 web/*.tsbuildinfo
+data/benchmarks/
+data/chroma_bench/
+eval_results/ablation/
+eval_results/ablation_report.md
+eval_results/ablation_scores.png
+eval_results/ablation_deltas.png
