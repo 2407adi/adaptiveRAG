@@ -1,0 +1,83 @@
+# ── Block 5.3: Ablation ladder ──────────────────────────────────────
+# One named preset per rung. THE RULE: each rung flips exactly ONE lever
+# relative to the previous rung (tests/test_benchmark.py enforces this).
+#
+# A "lever" is one of three things:
+#   - dispatch:  who orchestrates the question
+#                (forced_rag → routed → agent → supervisor)
+#   - expand:    the query-expansion call-time flag on RAGChain.query()
+#   - overrides: dotted-path Settings overrides (retrieval mode, reranker)
+#
+# `constants` are applied to EVERY rung identically — they are the fixed
+# lab environment, not levers, so they can never confound a comparison:
+#   - web search off:   the corpora are Wikipedia-derived; a live web call
+#                       would let agent rungs cheat past retrieval AND make
+#                       runs non-reproducible.
+#   - memory off:       recall could leak answers between benchmark samples.
+#   - approvals empty:  the sweep must run unattended (no human warrants).
+#   - temperature 0:    minimizes LLM nondeterminism between runs.
+#   - audit path:       benchmark tool calls go to their own logbook.
+
+constants:
+  tools.tavily.enabled: false
+  memory.enabled: false
+  agent.require_approval: []
+  llm.temperature: 0.0
+  tools.audit.path: "data/audit/benchmark_tool_calls.jsonl"
+
+rungs:
+  - name: "0_dense"
+    adds: "base dense RAG (vector search only)"
+    dispatch: forced_rag
+    expand: false
+    overrides:
+      retrieval.mode: dense
+      retrieval.rerank.enabled: false
+
+  - name: "1_expansion"
+    adds: "+ query expansion"
+    dispatch: forced_rag
+    expand: true
+    overrides:
+      retrieval.mode: dense
+      retrieval.rerank.enabled: false
+
+  - name: "2_hybrid"
+    adds: "+ hybrid retrieval (BM25 + RRF)"
+    dispatch: forced_rag
+    expand: true
+    overrides:
+      retrieval.mode: hybrid
+      retrieval.rerank.enabled: false
+
+  - name: "3_reranker"
+    adds: "+ cross-encoder reranker"
+    dispatch: forced_rag
+    expand: true
+    overrides:
+      retrieval.mode: hybrid
+      retrieval.rerank.enabled: true
+
+  - name: "4_routed"
+    adds: "+ router & multi-step reasoning"
+    dispatch: routed
+    expand: true
+    overrides:
+      retrieval.mode: hybrid
+      retrieval.rerank.enabled: true
+
+  - name: "5_agent"
+    adds: "+ ReAct agent"
+    dispatch: agent
+    expand: true
+    overrides:
+      retrieval.mode: hybrid
+      retrieval.rerank.enabled: true
+
+  - name: "6_supervisor"
+    adds: "+ multi-agent supervisor"
+    dispatch: supervisor
+    expand: true
+    overrides:
+      retrieval.mode: hybrid
+      retrieval.rerank.enabled: true
