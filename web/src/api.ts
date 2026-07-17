@@ -158,7 +158,11 @@ export async function ingestStatus(jobId: string): Promise<IngestJobStatus> {
   return (await resp.json()) as IngestJobStatus;
 }
 
-/* Poll until the job finishes; onUpdate fires on every tick. */
+/* Poll until the job finishes; onUpdate fires on every tick.
+   Transient failures (429 rate limit, network blip, busy server) back off
+   and retry instead of erroring the card — the job is still running
+   server-side; losing one poll means nothing. Only a 404 (job vanished =
+   server restarted) or persistent failure gives up. */
 export async function waitForIngest(
   jobId: string,
   onUpdate: (st: IngestJobStatus) => void,
@@ -166,12 +170,21 @@ export async function waitForIngest(
   timeoutMs = 30 * 60 * 1000,          // a monster doc on a tiny CPU is slow — be patient
 ): Promise<IngestJobStatus> {
   const deadline = Date.now() + timeoutMs;
+  let misses = 0;
   for (;;) {
-    const st = await ingestStatus(jobId);
-    onUpdate(st);
-    if (st.status === "done" || st.status === "failed") return st;
+    let wait = intervalMs;
+    try {
+      const st = await ingestStatus(jobId);
+      misses = 0;
+      onUpdate(st);
+      if (st.status === "done" || st.status === "failed") return st;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) throw e;   // job gone — real news
+      if (++misses > 10) throw e;                               // ~a minute of silence — give up
+      wait = Math.min(15000, intervalMs * 2 ** misses);         // back off: 3s, 6s, 12s… cap 15s
+    }
     if (Date.now() > deadline) throw new ApiError(0, "ingestion timed out — check back later");
-    await new Promise((r) => setTimeout(r, intervalMs));
+    await new Promise((r) => setTimeout(r, wait));
   }
 }
 

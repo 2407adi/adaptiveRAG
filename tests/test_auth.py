@@ -4,9 +4,13 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+import tempfile
+from pathlib import Path
+
 from adaptiverag.api.main import app
 from adaptiverag.api.auth import RateLimiter
 from adaptiverag.api.jobs import JobStore
+from adaptiverag.api.store import ConversationStore
 from adaptiverag.reason.router import QueryRoute
 
 GOLD = "gold-key-for-tests"     # admin card
@@ -24,6 +28,9 @@ def make_client(enabled=True, per_minute=10_000, max_upload_mb=1,
     app.state.rate_limiter = RateLimiter(per_minute)
     app.state.conversations = {}
     app.state.ingest_jobs = JobStore()
+    # Real (offline) cabinet on a throwaway file: /query files exchanges, so
+    # the store must exist even here. Don't rely on test_api running first.
+    app.state.store = ConversationStore(Path(tempfile.mkdtemp()) / "conversations.db")
     app.state.pipeline = SimpleNamespace(
         # minimal staff: every drill below routes DIRECT (no retrieval machinery)
         router=SimpleNamespace(classify=lambda q: SimpleNamespace(route=QueryRoute.DIRECT)),
@@ -90,6 +97,15 @@ def test_tally_is_per_card():
     for _ in range(3):
         _q(client, key=BLUE)                             # BLUE spends its budget
     assert _q(client, key=GOLD).status_code == 200       # GOLD's clicker untouched
+
+def test_status_polls_exempt_from_tally():
+    # The async-ingest UI polls status at 40/min — more than the whole budget.
+    # Polls must neither be bounced NOR spend the key's budget (live incident).
+    client = make_client(per_minute=3)
+    for _ in range(10):
+        r = client.get("/ingest/status/nope", headers={"X-API-Key": GOLD})
+        assert r.status_code == 404                      # auth passed; job just unknown
+    assert _q(client, key=GOLD).status_code == 200       # budget untouched by the polls
 
 
 # ── the caps: 413 / 507 (apply to gold cards too — they go public in demos) ─

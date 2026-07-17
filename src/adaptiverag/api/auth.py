@@ -59,9 +59,15 @@ def require_api_key(request: Request, key: str | None = Security(api_key_header)
     if role is None:
         raise HTTPException(status_code=401, detail="invalid API key")   # forged card
 
-    if not request.app.state.rate_limiter.allow(key):
-        raise HTTPException(status_code=429,                             # tally exceeded
-                            detail="rate limit exceeded; try again next minute")
+    # Status polls are exempt from the tally: the async-ingest UI polls
+    # /ingest/status every 1.5s (40/min — more than the whole 30/min budget!),
+    # and the limiter exists to protect the LLM bill; a status read is a
+    # free in-memory dict lookup. Without this exemption, every long ingest
+    # rate-limits its own progress bar (live incident, July 18 2026).
+    if not request.url.path.startswith("/ingest/status"):
+        if not request.app.state.rate_limiter.allow(key):
+            raise HTTPException(status_code=429,                         # tally exceeded
+                                detail="rate limit exceeded; try again next minute")
     return role
 
 
