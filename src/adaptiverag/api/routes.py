@@ -83,6 +83,23 @@ def _ensure_title(request: Request, conv_id: str | None) -> None:
         _auto_title(request, conv_id, first_user)
 
 
+def _file_then_title(request: Request, conv_id: str, question: str,
+                     outcome: dict) -> None:
+    """Background bookkeeping for streaming chat: runs AFTER the stream closed.
+
+    conversations.db sits on Azure Files (SMB — every commit is network
+    round-trips), so the two append_turn writes cost seconds. Doing them
+    in-stream held `done` hostage and left users staring at a blinking
+    cursor after the answer finished. Order matters: file the turns FIRST,
+    because the titler reads the question back from the store. A stream
+    that errored before producing an answer files nothing."""
+    answer = outcome.get("answer")
+    if answer is None:
+        return
+    _record_exchange(request, conv_id, question, answer, make_title=False)
+    _ensure_title(request, conv_id)
+
+
 def _auto_title(request: Request, conv_id: str, question: str) -> None:
     """The labeling clerk: skim the first question, write 3–6 words on the tab.
     NEVER allowed to break chatting — any failure falls back to a dumb-but-safe label."""
@@ -278,6 +295,7 @@ def _sse(event: dict) -> str:
 def chat_stream(req: QueryRequest, request: Request) -> StreamingResponse:
     pipe = request.app.state.pipeline
     conv_id = req.conversation_id or str(uuid4())
+    outcome: dict = {}          # the answer, handed from the generator to the background filer
 
     def notes() -> Iterator[str]:                        # the open slot in the window
         try:
@@ -309,15 +327,16 @@ def chat_stream(req: QueryRequest, request: Request) -> StreamingResponse:
                             "verdicts": [{"claim": v.claim, "status": v.status.value,
                                           "max_score": v.max_score} for v in g.verdicts]})
 
-            _record_exchange(request, conv_id, req.question, answer,
-                             make_title=False)           # filing is fast; titling is NOT —
-            yield _sse({"type": "done", "conversation_id": conv_id})   # ours, after ALL work
+            outcome["answer"] = answer                   # hand off to the background filer —
+            yield _sse({"type": "done", "conversation_id": conv_id})   # done fires IMMEDIATELY;
+                                                         # SMB-slow SQLite writes happen after close
 
         except Exception as exc:                         # 200 already sent — errors become a note
             yield _sse({"type": "error", "detail": f"{type(exc).__name__}: {exc}"})
 
     return StreamingResponse(notes(), media_type="text/event-stream",
-                             background=BackgroundTask(_ensure_title, request, conv_id))
+                             background=BackgroundTask(_file_then_title, request,
+                                                       conv_id, req.question, outcome))
 
 def _agent_envelope(result: dict) -> AgentResponse:
     # Translate executor dict → sealed envelope. One translator for both desks and both endpoints.

@@ -65,4 +65,7 @@ jobs:
           az containerapp update \
             --name adaptiverag \
             --resource-group genai-rag-agents-rg \
-            --image ${{ env.IMAGE }}:${{ github.sha }}
+            --image ${{ env.IMAGE }}:${{ github.sha }} \
+            --set-env-vars AZURE_OPENAI_EMBED_DEPLOYMENT=text-embedding-3-small
+          # env vars persist across deploys anyway; declaring here keeps the
+          # config in code (portal edits survive, but this is the record)

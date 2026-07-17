@@ -200,6 +200,16 @@ def test_ingest_status_unknown_job_is_404(client):
     assert "restarted" in r.json()["detail"]
 
 
+def test_chat_stream_files_turns_after_close(client):
+    # The SMB fix: done fires immediately, the SQLite writes moved to a
+    # background task. The turns must STILL land once the stream closes.
+    r = client.post("/chat/stream", json={"question": "what did Solstice raise?"})
+    conv = next(e["conversation_id"] for e in sse_events(r) if e["type"] == "route")
+    turns = client.get(f"/conversations/{conv}").json()["turns"]
+    assert [t["role"] for t in turns] == ["user", "assistant"]
+    assert client.get(f"/conversations/{conv}").json()["title"] is not None
+
+
 def test_chat_stream_event_order(client):
     r = client.post("/chat/stream", json={"question": "what did Solstice raise?"})
     assert r.headers["content-type"].startswith("text/event-stream")
