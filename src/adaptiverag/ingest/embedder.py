@@ -1,7 +1,8 @@
 import logging
+import time
 from abc import ABC, abstractmethod
 from sentence_transformers import SentenceTransformer
-from openai import AzureOpenAI, OpenAI
+from openai import AzureOpenAI, OpenAI, RateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -117,15 +118,35 @@ class AzureEmbedder(Embedder):
         )
         return response.data[0].embedding
 
+    def _create_with_patience(self, batch: list[str]):
+        """One embeddings call, resilient to Azure TPM rate limits.
+
+        A big document can exceed the deployment's tokens-per-minute quota
+        mid-ingest. The SDK already retries twice; past that we wait out the
+        quota window ourselves (30s, 60s, 90s…) instead of failing the whole
+        ingest job. Cap ~5 minutes of patience, then let the error surface
+        into the job status."""
+        waits = (30, 60, 90, 120)
+        for attempt, wait in enumerate((*waits, None)):
+            try:
+                return self._client.embeddings.create(
+                    input=batch, model=self._deployment,
+                )
+            except RateLimitError:
+                if wait is None:
+                    raise                      # patience spent — job reports the 429
+                logger.warning(
+                    "Azure embedding rate limit hit (attempt %d) — waiting %ds "
+                    "(raise the deployment's TPM quota to avoid this)",
+                    attempt + 1, wait)
+                time.sleep(wait)
+
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         # One API call per _MAX_BATCH inputs (the ingest pipeline sends 32
         # at a time anyway, but be correct for any caller).
         out: list[list[float]] = []
         for start in range(0, len(texts), self._MAX_BATCH):
-            response = self._client.embeddings.create(
-                input=texts[start:start + self._MAX_BATCH],
-                model=self._deployment,
-            )
+            response = self._create_with_patience(texts[start:start + self._MAX_BATCH])
             out.extend(item.embedding for item in response.data)
         return out
 
