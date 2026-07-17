@@ -134,3 +134,67 @@ class TestHybridRetriever:
     def test_k_limits_output(self, hybrid):
         results = hybrid.search("Basel", k=2)
         assert len(results) <= 2
+
+# ---- lazy seeding + thread safety (the boot-loop fix) ----
+
+class TestLazySeedAndThreadSafety:
+    def test_search_before_any_add_is_empty_not_crash(self):
+        # The window between boot and the background seed finishing:
+        # hybrid must transparently degrade to dense-only.
+        assert BM25Retriever().search("anything", k=3) == []
+
+    def test_add_dedupes_by_chunk_id(self):
+        # Ingest racing the boot seed can deliver the same chunk twice.
+        # (Filler docs: BM25 IDF ≤ 0 when a term is in half+ of a tiny corpus.)
+        bm25 = BM25Retriever()
+        bm25.add(CHUNKS)                                     # filler corpus
+        bm25.add([_make_chunk("dup", "Basel III capital rules")])
+        bm25.add([_make_chunk("dup", "Basel III capital rules"),
+                  _make_chunk("new", "unique liquidity keyword zanthum")])
+        ids = [r.chunk_id for r in bm25.search("zanthum Basel", k=20)]
+        assert ids.count("dup") == 1 and "new" in ids
+
+    def test_seed_bm25_pulls_store_into_index(self):
+        from types import SimpleNamespace
+        from adaptiverag.pipeline import seed_bm25
+        bm25 = BM25Retriever()
+        seeded = CHUNKS + [_make_chunk("s1", "unique keyword zanthum appears here")]
+        store = SimpleNamespace(get_all=lambda: seeded)
+        assert seed_bm25(bm25, store) == len(seeded)
+        assert [r.chunk_id for r in bm25.search("zanthum", k=5)] == ["s1"]
+
+    def test_seed_bm25_empty_store_leaves_index_unbuilt(self):
+        from types import SimpleNamespace
+        from adaptiverag.pipeline import seed_bm25
+        bm25 = BM25Retriever()
+        assert seed_bm25(bm25, SimpleNamespace(get_all=lambda: [])) == 0
+        assert bm25.search("anything") == []
+
+    def test_concurrent_add_and_search_dont_corrupt(self):
+        # Smoke drill for the lock: hammer add() and search() from threads.
+        import threading
+        bm25 = BM25Retriever()
+        errors = []
+
+        def writer(n):
+            try:
+                for i in range(20):
+                    bm25.add([_make_chunk(f"w{n}-{i}", f"Basel document number {i}")])
+            except Exception as e:  # pragma: no cover
+                errors.append(e)
+
+        def reader():
+            try:
+                for _ in range(50):
+                    bm25.search("Basel document", k=5)
+            except Exception as e:  # pragma: no cover
+                errors.append(e)
+
+        threads = [threading.Thread(target=writer, args=(n,)) for n in range(3)]
+        threads += [threading.Thread(target=reader) for _ in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == []
+        assert len(bm25.search("Basel document", k=100)) > 0

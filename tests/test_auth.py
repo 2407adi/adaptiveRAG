@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from adaptiverag.api.main import app
 from adaptiverag.api.auth import RateLimiter
+from adaptiverag.api.jobs import JobStore
 from adaptiverag.reason.router import QueryRoute
 
 GOLD = "gold-key-for-tests"     # admin card
@@ -17,17 +18,20 @@ def make_client(enabled=True, per_minute=10_000, max_upload_mb=1,
     """Stage the building with adjustable house rules per drill."""
     app.state.settings = SimpleNamespace(auth=SimpleNamespace(
         enabled=enabled, rate_limit_per_minute=per_minute,
-        max_upload_mb=max_upload_mb, max_total_chunks=max_total_chunks))
+        max_upload_mb=max_upload_mb, max_total_chunks=max_total_chunks,
+        max_upload_chunks=1500))
     app.state.api_keys = {GOLD: "admin", BLUE: "user"}
     app.state.rate_limiter = RateLimiter(per_minute)
     app.state.conversations = {}
+    app.state.ingest_jobs = JobStore()
     app.state.pipeline = SimpleNamespace(
         # minimal staff: every drill below routes DIRECT (no retrieval machinery)
         router=SimpleNamespace(classify=lambda q: SimpleNamespace(route=QueryRoute.DIRECT)),
         llm_client=SimpleNamespace(generate=lambda p: "direct answer"),
         vector_store=SimpleNamespace(count=lambda: store_count),   # dial the archive fill level
-        ingest=SimpleNamespace(ingest=lambda d, scope="shared": {"files_processed": 1, "total_chunks": 1,
-                                                                 "corpus_summary": "test"}),
+        ingest=SimpleNamespace(ingest=lambda d, scope="shared", progress_cb=None, max_chunks=None:
+                               {"files_processed": 1, "total_chunks": 1,
+                                "corpus_summary": "test"}),
     )
     return TestClient(app)          # NO `with` → lifespan never runs; we staffed it by hand
 
@@ -70,7 +74,7 @@ def test_blue_card_bounced_at_the_dock():
 def test_gold_card_can_query_and_ingest():
     client = make_client()
     assert _q(client, key=GOLD).status_code == 200
-    assert _ingest(client, GOLD).status_code == 200
+    assert _ingest(client, GOLD).status_code == 202   # async: claim ticket, not receipt
 
 
 # ── the tally counter: 429 ──────────────────────────────────────────────────

@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import logging
 import os
+import threading
+import time
 
 from .config import Settings
 from .ingest.loader import DocumentLoader
@@ -30,6 +33,27 @@ from .agents.tools import build_default_registry, ToolRegistry
 from .agents.executor import AgentExecutor
 from .agents.supervisor import SupervisorAgent
 from .agents.memory import MemoryManager    # was: BufferMemory, VectorMemory, ConversationMemory
+
+logger = logging.getLogger(__name__)
+
+
+def seed_bm25(bm25: BM25Retriever, vector_store) -> int:
+    """Rebuild the in-RAM BM25 index from every chunk persisted in the store.
+
+    Extracted from wire_pipeline so it can run either synchronously (eval
+    suite, benchmark, Streamlit — where reproducibility demands the index
+    is ready before the first query) or on a background thread (the API,
+    where boot time is probed and a big store must never block /health).
+    Returns the number of chunks indexed.
+    """
+    started = time.time()
+    existing = vector_store.get_all()          # the slow part on a big store
+    if existing:
+        bm25.add(existing)
+    logger.info("BM25 index seeded: %d chunks in %.1fs",
+                len(existing), time.time() - started)
+    return len(existing)
+
 
 @dataclass
 class Pipeline:
@@ -57,13 +81,22 @@ class Pipeline:
 def wire_pipeline(
     settings: Settings,
     collection_name: str,
-    persist_directory: str | Path
+    persist_directory: str | Path,
+    lazy_bm25: bool = False,
 ) -> Pipeline:
     """Build and connect every pipeline component from settings.
 
     collection_name / persist_directory vary per caller (the UI uses a
     'streamlit_docs' store, the eval suite a hermetic 'eval_collection'),
     so they're explicit args; everything else comes from settings.
+
+    lazy_bm25=True moves the BM25 boot seed onto a background daemon
+    thread so wiring returns immediately no matter how big the store is.
+    The API uses this: a fat store must never make boot slower than the
+    startup probe's patience (the boot-loop failure mode). Until the seed
+    finishes, hybrid search transparently serves dense-only results.
+    Default False: eval/benchmark/Streamlit keep the synchronous seed —
+    reproducible runs need the index ready before the first query.
     """
     persist_directory = str(persist_directory)
 
@@ -85,9 +118,16 @@ def wire_pipeline(
     hybrid_retriever = None
     if settings.retrieval.mode == "hybrid":
         bm25 = BM25Retriever()
-        existing = vector_store.get_all()
-        if existing:
-            bm25.add(existing)      # restart-safe: rebuild BM25 from Chroma
+        if lazy_bm25:
+            # Background seed: boot finishes now, keyword search joins in
+            # when ready. BM25Retriever is thread-safe (lock + dedupe), so
+            # an ingest landing mid-seed can't corrupt the index.
+            threading.Thread(
+                target=seed_bm25, args=(bm25, vector_store),
+                daemon=True, name="bm25-seed",
+            ).start()
+        else:
+            seed_bm25(bm25, vector_store)   # restart-safe: rebuild BM25 from Chroma
         hybrid_retriever = HybridRetriever(
             vector_store=vector_store,
             bm25=bm25,

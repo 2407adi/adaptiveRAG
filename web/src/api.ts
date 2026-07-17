@@ -97,15 +97,29 @@ export async function getConversation(id: string): Promise<{ title: string | nul
   return (await resp.json()) as { title: string | null; turns: ServerTurn[] };
 }
 
-/* ---------- ingest (multipart; XHR for upload progress) ---------- */
+/* ---------- ingest (async: upload → claim ticket → poll) ---------- */
 
 export interface IngestResult { files_processed: number; total_chunks: number; corpus_summary?: string | null; }
 
+export interface IngestAccepted { job_id: string; status: string; files: string[]; }
+
+export interface IngestJobStatus {
+  job_id: string;
+  status: "queued" | "running" | "done" | "failed";
+  stage?: string | null;
+  chunks_done: number;
+  chunks_total: number;
+  files: string[];
+  error?: string | null;
+  result?: IngestResult | null;
+}
+
+/* Upload the files; resolves as soon as the server accepts the job (202). */
 export function ingestFiles(
   files: File[],
   conversationId: string,
   onProgress: (fraction: number) => void,
-): Promise<IngestResult> {
+): Promise<IngestAccepted> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
     files.forEach((f) => form.append("files", f));
@@ -121,7 +135,7 @@ export function ingestFiles(
     };
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(JSON.parse(xhr.responseText) as IngestResult);
+        resolve(JSON.parse(xhr.responseText) as IngestAccepted);
       } else {
         if (xhr.status === 401) onUnauthorized();
         let detail = `upload failed (${xhr.status})`;
@@ -136,6 +150,29 @@ export function ingestFiles(
     xhr.onerror = () => reject(new ApiError(0, "network error during upload"));
     xhr.send(form);
   });
+}
+
+/* One poll of the job record. 404 = the server restarted mid-job. */
+export async function ingestStatus(jobId: string): Promise<IngestJobStatus> {
+  const resp = await check(await fetch(`/ingest/status/${jobId}`, { headers: headers(false) }));
+  return (await resp.json()) as IngestJobStatus;
+}
+
+/* Poll until the job finishes; onUpdate fires on every tick. */
+export async function waitForIngest(
+  jobId: string,
+  onUpdate: (st: IngestJobStatus) => void,
+  intervalMs = 1500,
+  timeoutMs = 30 * 60 * 1000,          // a monster doc on a tiny CPU is slow — be patient
+): Promise<IngestJobStatus> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const st = await ingestStatus(jobId);
+    onUpdate(st);
+    if (st.status === "done" || st.status === "failed") return st;
+    if (Date.now() > deadline) throw new ApiError(0, "ingestion timed out — check back later");
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
 }
 
 /* ---------- SSE streams ---------- */

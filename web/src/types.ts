@@ -92,6 +92,9 @@ export interface IngestMsg {
   progress?: number;
   detail?: string;
   chunks?: number;
+  stage?: string;          // async ingest: loading | chunking | embedding | storing | summarizing
+  chunksDone?: number;     // live embedding progress (e.g. 340 / 1057)
+  chunksTotal?: number;
 }
 
 export interface AssistantMsg {

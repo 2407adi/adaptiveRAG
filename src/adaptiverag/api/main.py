@@ -11,6 +11,7 @@ from adaptiverag.config import load_settings
 from adaptiverag.pipeline import wire_pipeline
 from adaptiverag.api import routes
 from adaptiverag.api.auth import RateLimiter
+from adaptiverag.api.jobs import JobStore
 from adaptiverag.api.store import ConversationStore   # the ledger cabinet
 
 
@@ -22,6 +23,10 @@ async def lifespan(app: FastAPI):
         settings,
         collection_name="adaptiverag",
         persist_directory="data/chroma",
+        lazy_bm25=True,   # seed the keyword index in the background — a fat
+                          # store must never make boot outlast the startup
+                          # probe (the boot-loop failure mode). Until it's
+                          # ready, hybrid search serves dense-only.
     )
     app.state.settings = settings
     # 4.3a: the whiteboard (in-RAM dict, wiped nightly) is retired. The ledger
@@ -29,6 +34,7 @@ async def lifespan(app: FastAPI):
     app.state.store = ConversationStore("data/conversations.db")
     app.state.api_keys = settings.auth.keys          # the card register (from .env, via load_settings)
     app.state.rate_limiter = RateLimiter(settings.auth.rate_limit_per_minute)   # one shared tally counter
+    app.state.ingest_jobs = JobStore()               # claim tickets for async ingestion
     yield                                            # ---- doors open; serve visitors ----
     # ---- closing: nothing to release yet (Chroma persists itself) ----
 

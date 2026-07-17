@@ -169,6 +169,9 @@ class AuthConfig:
     rate_limit_per_minute: int = 30     # per-key tally budget → 429 past it
     max_upload_mb: int = 20             # the dock scale: single-file cap → 413
     max_total_chunks: int = 50_000      # the archive ceiling: global store cap → 507
+    max_upload_chunks: int = 1500       # per-UPLOAD work cap: checked after chunking,
+                                        # BEFORE embedding (job fails with a friendly
+                                        # message instead of strangling the CPU)
     keys: dict = field(default_factory=dict)   # SECRET — filled from env by load_settings, NEVER from YAML
 
 
