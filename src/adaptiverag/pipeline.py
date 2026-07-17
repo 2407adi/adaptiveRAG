@@ -17,7 +17,7 @@ import time
 from .config import Settings
 from .ingest.loader import DocumentLoader
 from .ingest.chunker import RecursiveChunker
-from .ingest.embedder import create_embedder, Embedder
+from .ingest.embedder import build_embedder_from_settings, Embedder
 from .ingest.pipeline import IngestPipeline
 from .ingest.summarizer import CorpusSummarizer
 from .retrieve.vector_store import create_vector_store, VectorStore
@@ -100,8 +100,13 @@ def wire_pipeline(
     """
     persist_directory = str(persist_directory)
 
-    # 1. Embedder (local sentence-transformers, no API key)
-    embedder = create_embedder("local", model_name="all-MiniLM-L6-v2")
+    # 1. Embedder — config-driven backend. Production: azure_openai (the
+    #    math runs on Azure's GPUs; ~1,000 chunks in <1 min for pennies).
+    #    Missing creds/deployment, dev Macs, the future fully-local build:
+    #    falls back to local sentence-transformers automatically.
+    #    ⚠ Backends have different vector dimensions (384 vs 1536) — never
+    #    switch backends over an existing store; wipe + re-ingest instead.
+    embedder = build_embedder_from_settings(settings)
 
     # 2. Vector store (Chroma, persistent)
     vector_store = create_vector_store(
