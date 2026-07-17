@@ -94,7 +94,9 @@ class RetrievalConfig:
 class AzureConfig:
     endpoint: str = ""
     api_key: str = ""
-    deployment: str = ""
+    deployment: str = ""          # the CHAT deployment (gpt-4o)
+    embed_deployment: str = ""    # the EMBEDDING deployment (e.g. text-embedding-3-small);
+                                  # empty → embedder falls back to local MiniLM
 
 @dataclass
 class RoutingConfig:
@@ -220,6 +222,7 @@ def load_settings() -> Settings:
             endpoint=os.getenv("AZURE_OPENAI_ENDPOINT", ""),
             api_key=os.getenv("AZURE_OPENAI_API_KEY", ""),
             deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", ""),
+            embed_deployment=os.getenv("AZURE_OPENAI_EMBED_DEPLOYMENT", ""),
         ),
         routing=RoutingConfig(**cfg.get("routing", {})),
         tools=ToolsConfig(**cfg.get("tools", {})),
