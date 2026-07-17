@@ -248,7 +248,11 @@ function IngestCard({ m }: { m: IngestMsg }) {
             />
           </div>
           <div className="text-mut text-xs mt-2">
-            {m.status === "uploading" ? "uploading…" : "processing — loading → chunking → embedding…"}
+            {m.status === "uploading"
+              ? "uploading…"
+              : `processing — ${m.stage ?? "queued"}${
+                  m.chunksTotal ? ` (${m.chunksDone ?? 0}/${m.chunksTotal} chunks)` : ""
+                }…`}
           </div>
         </>
       )}

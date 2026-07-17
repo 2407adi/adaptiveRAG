@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import threading
 from rank_bm25 import BM25Okapi
 
 from adaptiverag.retrieve.vector_store import StoredChunk, SearchResult, VectorStore
@@ -10,12 +11,22 @@ from adaptiverag.ingest.embedder import Embedder
 
 
 class BM25Retriever:
-    """Keyword-based retriever using BM25 (Okapi variant)."""
+    """Keyword-based retriever using BM25 (Okapi variant).
+
+    Thread-safe: since the boot-time seed now runs on a background thread
+    (see wire_pipeline's lazy_bm25), add() can race a live ingest's add()
+    or a search(). A lock serializes writers; add() REPLACES the chunk
+    list instead of mutating it, so a search that grabbed the previous
+    (list, index) pair mid-rebuild still works on a consistent snapshot.
+    Before the first add() completes, search() returns [] — hybrid callers
+    transparently degrade to dense-only until the index is ready.
+    """
 
     def __init__(self) -> None:
         self._chunks: list[StoredChunk] = []
         self._tokenised_corpus: list[list[str]] = []
         self._index: BM25Okapi | None = None
+        self._lock = threading.Lock()
 
     # ---- simple whitespace tokeniser ----
     @staticmethod
@@ -24,22 +35,32 @@ class BM25Retriever:
 
     # ---- build the BM25 index ----
     def add(self, chunks: list[StoredChunk]) -> None:
-        self._chunks.extend(chunks)
-        self._tokenised_corpus = [
-            self._tokenise(c.text) for c in self._chunks
-        ]
-        self._index = BM25Okapi(self._tokenised_corpus)
+        with self._lock:
+            # Dedupe by chunk id: if an ingest lands while the boot seed is
+            # reading the store, the same chunk could arrive via both paths.
+            seen = {c.id for c in self._chunks}
+            fresh = [c for c in chunks if c.id not in seen]
+            if not fresh:
+                return
+            # REPLACE, don't extend — old (list, index) snapshots stay valid.
+            self._chunks = self._chunks + fresh
+            self._tokenised_corpus = [
+                self._tokenise(c.text) for c in self._chunks
+            ]
+            self._index = BM25Okapi(self._tokenised_corpus)
 
     # ---- search ----
     def search(
         self, query: str, k: int = 5,
         scopes: list[str] | None = None,   # same guest list as the librarian
     ) -> list[SearchResult]:
-        if self._index is None or len(self._chunks) == 0:
+        with self._lock:                   # grab a consistent snapshot
+            index, chunks = self._index, self._chunks
+        if index is None or len(chunks) == 0:
             return []
 
         tokens = self._tokenise(query)
-        scores = self._index.get_scores(tokens)
+        scores = index.get_scores(tokens)
 
         # sort the ENTIRE line — no [:k] here anymore. The bouncer must be
         # allowed to walk past rejected guests to find k valid ones.
@@ -49,7 +70,7 @@ class BM25Retriever:
         for idx, score in ranked:
             if score <= 0:
                 continue
-            chunk = self._chunks[idx]
+            chunk = chunks[idx]            # the snapshot, not self._chunks
             # the bouncer: wrong stamp (or no stamp) → not seated
             if scopes and chunk.metadata.get("scope") not in scopes:
                 continue

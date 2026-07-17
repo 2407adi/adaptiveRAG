@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from adaptiverag.api.main import app
 from adaptiverag.api.auth import RateLimiter
+from adaptiverag.api.jobs import JobStore
 from adaptiverag.api.store import ConversationStore
 from adaptiverag.reason.router import QueryRoute
 
@@ -90,8 +91,9 @@ def client(tmp_path):                                # tmp_path: pytest's throwa
         router=FakeRouter(), llm_client=FakeLLM(),
         rag_chain=FakeChain(), multi_step_chain=FakeChain(),
         grounding_validator=FakeValidator(),
-        ingest=SimpleNamespace(ingest=lambda d, scope="shared": {"files_processed": 1, "total_chunks": 3,
-                                                                 "corpus_summary": "test docs"}),
+        ingest=SimpleNamespace(ingest=lambda d, scope="shared", progress_cb=None, max_chunks=None:
+                               {"files_processed": 1, "total_chunks": 3,
+                                "corpus_summary": "test docs"}),
         vector_store=SimpleNamespace(count=lambda: 0),       # empty archive → caps never trip here
         agent_executor=FakeAgent(), supervisor_agent=None,   # None → 503 path testable
     )
@@ -102,9 +104,10 @@ def client(tmp_path):                                # tmp_path: pytest's throwa
     # equipment on the shelf too — same trick as the fake staff above.
     app.state.settings = SimpleNamespace(auth=SimpleNamespace(
         enabled=True, rate_limit_per_minute=10_000,  # tally so generous it never trips
-        max_upload_mb=20, max_total_chunks=50_000))
+        max_upload_mb=20, max_total_chunks=50_000, max_upload_chunks=1500))
     app.state.api_keys = {"gold-test": "admin"}
     app.state.rate_limiter = RateLimiter(10_000)
+    app.state.ingest_jobs = JobStore()               # fresh ticket rack per test
     c = TestClient(app)                              # NO `with` → lifespan never runs
     c.headers["X-API-Key"] = "gold-test"             # every test flashes the gold card
     return c
@@ -156,9 +159,45 @@ def test_conversation_drawer_fills_and_reads_back(client):
     assert client.get("/conversations/nope").status_code == 404
 
 
-def test_ingest_returns_receipt(client):
+def _poll_ingest(client, job_id, tries=50):
+    """Poll the claim ticket until the background thread finishes."""
+    import time
+    for _ in range(tries):
+        body = client.get(f"/ingest/status/{job_id}").json()
+        if body["status"] in ("done", "failed"):
+            return body
+        time.sleep(0.05)
+    raise AssertionError("ingest job never finished")
+
+
+def test_ingest_returns_claim_ticket_then_receipt(client):
+    # Async contract: 202 + job_id immediately; the receipt arrives via polling.
     r = client.post("/ingest", files={"files": ("a.txt", b"hello world", "text/plain")})
-    assert r.json() == {"files_processed": 1, "total_chunks": 3, "corpus_summary": "test docs"}
+    assert r.status_code == 202
+    body = r.json()
+    assert body["files"] == ["a.txt"] and body["job_id"]
+    final = _poll_ingest(client, body["job_id"])
+    assert final["status"] == "done"
+    assert final["result"] == {"files_processed": 1, "total_chunks": 3,
+                               "corpus_summary": "test docs"}
+
+
+def test_ingest_job_failure_is_reported_not_lost(client):
+    # A crashing pipeline must surface as status=failed with the message —
+    # never a hung job or a 500.
+    def boom(d, scope="shared", progress_cb=None, max_chunks=None):
+        raise RuntimeError("embedder exploded")
+    app.state.pipeline.ingest = SimpleNamespace(ingest=boom)
+    job_id = client.post("/ingest", files={"files": ("a.txt", b"x", "text/plain")}).json()["job_id"]
+    final = _poll_ingest(client, job_id)
+    assert final["status"] == "failed"
+    assert "embedder exploded" in final["error"]
+
+
+def test_ingest_status_unknown_job_is_404(client):
+    r = client.get("/ingest/status/no-such-job")
+    assert r.status_code == 404
+    assert "restarted" in r.json()["detail"]
 
 
 def test_chat_stream_event_order(client):

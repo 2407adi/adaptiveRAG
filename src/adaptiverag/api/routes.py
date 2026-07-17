@@ -1,6 +1,8 @@
 """The service windows."""
 import json
+import shutil
 import tempfile
+import threading
 from collections.abc import Iterator
 from pathlib import Path
 from uuid import uuid4
@@ -10,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 from adaptiverag.api.auth import require_api_key, require_role
+from adaptiverag.ingest.exceptions import IngestTooLarge
 from adaptiverag.scope import (          # Block 4.2b: stamps + guest lists
     SHARED_SCOPE, chat_scope, scopes_for, current_scopes,
 )
@@ -17,6 +20,7 @@ from adaptiverag.scope import (          # Block 4.2b: stamps + guest lists
 from adaptiverag.api.models import (
     QueryRequest, QueryResponse, Source, GroundingReport,
     ClaimVerdict, ReasoningStep, IngestResponse,
+    IngestAccepted, IngestJobStatus,
     AgentStartRequest, AgentResumeRequest, AgentResponse,
     AgentReport, ApprovalRequest,
 )
@@ -134,25 +138,64 @@ def query(req: QueryRequest, request: Request) -> QueryResponse:
     )
 
 
-@router.post("/ingest", response_model=IngestResponse,
+# One heavy ingestion at a time, server-wide: the box has a fraction of a CPU,
+# and two concurrent embedding jobs would starve serving traffic completely.
+# Later jobs wait here (their status shows "queued"), then run in turn.
+_INGEST_LOCK = threading.Lock()
+
+
+def _run_ingest_job(app, job_id: str, tmpdir: str, scope: str) -> None:
+    """The background worker: runs the real pipeline, narrates progress into
+    the job record, and always cleans up the loading dock. Runs on a daemon
+    thread — completely detached from any HTTP connection, so neither the
+    ingress timeout nor an impatient browser can kill it."""
+    jobs = app.state.ingest_jobs
+    pipe = app.state.pipeline
+    cfg = app.state.settings.auth
+    try:
+        with _INGEST_LOCK:
+            jobs.update(job_id, status="running", stage="loading")
+            stats = pipe.ingest.ingest(
+                tmpdir, scope=scope,
+                progress_cb=lambda stage, done, total: jobs.update(
+                    job_id, stage=stage, chunks_done=done, chunks_total=total),
+                max_chunks=cfg.max_upload_chunks,        # the work cap — fails fast, pre-embedding
+            )
+            jobs.update(job_id, status="done", stage="done", result=stats)
+    except IngestTooLarge as e:
+        jobs.update(job_id, status="failed", error=str(e))
+    except Exception as e:  # noqa: BLE001 — job must record ANY failure, never vanish
+        jobs.update(job_id, status="failed", error=f"{type(e).__name__}: {e}")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)        # demolish the dock, success or not
+
+
+@router.post("/ingest", response_model=IngestAccepted, status_code=202,
              dependencies=[Depends(require_role("admin"))])   # the stricter doorman: gold cards only
 def ingest(
     request: Request,
     files: list[UploadFile] = File(...),
     conversation_id: str | None = Form(None),    # 4.2b: which locker? None = public shelf
-) -> IngestResponse:
-    # The drop-off window: visitor hands over documents, gets a receipt.
+) -> IngestAccepted:
+    # The drop-off window — now ASYNC: accept the files, hand back a claim
+    # ticket (job_id) in under a second, do the heavy work on a background
+    # thread. The UI polls /ingest/status/{job_id} for live progress.
     pipe = request.app.state.pipeline
     cfg = request.app.state.settings.auth
 
+    # Cheap gate checks stay synchronous — instant answers, proper HTTP codes.
     # The archive ceiling: gold cards go public for demos, so the CAP — not the
     # role — is what actually protects the store. Applies to everyone, admin too.
     if pipe.vector_store.count() >= cfg.max_total_chunks:
         raise HTTPException(status_code=507,             # Insufficient Storage
                             detail="document store is full; ingestion is closed")
 
+    # A loading dock that does NOT self-demolish: the job outlives this
+    # request, so the worker thread owns the cleanup (see _run_ingest_job).
     max_bytes = cfg.max_upload_mb * 1024 * 1024
-    with tempfile.TemporaryDirectory() as tmpdir:        # a loading dock that self-demolishes
+    tmpdir = tempfile.mkdtemp(prefix="ingest_")
+    names: list[str] = []
+    try:
         for f in files:
             content = f.file.read()
             if len(content) > max_bytes:                 # the dock scale: weigh every package
@@ -160,11 +203,41 @@ def ingest(
                                     detail=f"{f.filename}: exceeds {cfg.max_upload_mb} MB upload limit")
             name = Path(f.filename or "upload.bin").name   # unnamed file? give it a boring name
             (Path(tmpdir) / name).write_bytes(content)
-        # 4.2b: the clerk's ink stamp — a conversation_id means these books go
-        # into that chat's locker; without one they land on the public shelf.
-        scope = chat_scope(conversation_id) if conversation_id else SHARED_SCOPE
-        stats = pipe.ingest.ingest(tmpdir, scope=scope)  # loader→chunker→embedder→Chroma, now stamped
-    return IngestResponse(**stats)                       # dock demolished; chunks live in Chroma
+            names.append(name)
+    except Exception:
+        shutil.rmtree(tmpdir, ignore_errors=True)        # rejected at the dock → clean up now
+        raise
+
+    # 4.2b: the clerk's ink stamp — a conversation_id means these books go
+    # into that chat's locker; without one they land on the public shelf.
+    scope = chat_scope(conversation_id) if conversation_id else SHARED_SCOPE
+
+    job = request.app.state.ingest_jobs.create(files=names)
+    threading.Thread(
+        target=_run_ingest_job,
+        args=(request.app, job.id, tmpdir, scope),
+        daemon=True,
+    ).start()
+    return IngestAccepted(job_id=job.id, status=job.status, files=names)
+
+
+@router.get("/ingest/status/{job_id}", response_model=IngestJobStatus,
+            dependencies=[Depends(require_role("admin"))])
+def ingest_status(job_id: str, request: Request) -> IngestJobStatus:
+    # The claim-ticket window: instant read of the job record.
+    job = request.app.state.ingest_jobs.get(job_id)
+    if job is None:
+        # Jobs live in memory — a missing id usually means the container
+        # restarted mid-job. The UI shows this message verbatim.
+        raise HTTPException(status_code=404,
+                            detail="unknown ingest job (the server may have "
+                                   "restarted during processing — please retry the upload)")
+    return IngestJobStatus(
+        job_id=job.id, status=job.status, stage=job.stage,
+        chunks_done=job.chunks_done, chunks_total=job.chunks_total,
+        files=job.files, error=job.error,
+        result=IngestResponse(**job.result) if job.result else None,
+    )
 
 
 

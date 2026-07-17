@@ -330,10 +330,27 @@ export function useChat() {
       });
 
     try {
-      const res = await api.ingestFiles(files, convId, (frac) =>
+      // Phase 1: ship the bytes. Resolves the moment the server says 202
+      // with a claim ticket — the heavy work hasn't started yet.
+      const accepted = await api.ingestFiles(files, convId, (frac) =>
         patchIngest((m) => ({ ...m, progress: frac, status: frac >= 1 ? "processing" : "uploading" })),
       );
-      patchIngest((m) => ({ ...m, status: "done", chunks: res.total_chunks }));
+      // Phase 2: poll the ticket. Live stage + chunk counts drive the bar.
+      const final = await api.waitForIngest(accepted.job_id, (st) =>
+        patchIngest((m) => ({
+          ...m,
+          status: "processing",
+          stage: st.stage ?? st.status,
+          chunksDone: st.chunks_done,
+          chunksTotal: st.chunks_total,
+          progress: st.chunks_total > 0 ? st.chunks_done / st.chunks_total : undefined,
+        })),
+      );
+      if (final.status === "failed") {
+        patchIngest((m) => ({ ...m, status: "error", detail: final.error ?? "ingestion failed" }));
+      } else {
+        patchIngest((m) => ({ ...m, status: "done", chunks: final.result?.total_chunks }));
+      }
     } catch (e) {
       patchIngest((m) => ({ ...m, status: "error", detail: e instanceof Error ? e.message : String(e) }));
     } finally {

@@ -113,6 +113,8 @@ auth:
   rate_limit_per_minute: 30    # per-key tally; past this → 429
   max_upload_mb: 20            # dock scale: any single file above this → 413
   max_total_chunks: 50000      # archive ceiling: ingest refused past this → 507 (applies to admin too)
+  max_upload_chunks: 1500      # per-upload work cap: more chunks than this → job fails fast
+                               # (~1500 chunks ≈ a 200-page text PDF; protects the CPU, not the disk)
   # Keys NEVER live here (this file is in git). They live in .env:
   #   ADAPTIVERAG_API_KEYS="<key>:admin,<key>:user"
 

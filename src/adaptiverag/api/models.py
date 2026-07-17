@@ -101,3 +101,22 @@ class IngestResponse(BaseModel):
     files_processed: int
     total_chunks: int
     corpus_summary: str | None = None
+
+
+class IngestAccepted(BaseModel):
+    # 202 body: "got your files, working on it" — the claim ticket.
+    job_id: str
+    status: str = "queued"
+    files: list[str] = []
+
+
+class IngestJobStatus(BaseModel):
+    # GET /ingest/status/{job_id} — the live progress record the UI polls.
+    job_id: str
+    status: str                        # queued | running | done | failed
+    stage: str | None = None           # loading | chunking | embedding | storing | summarizing
+    chunks_done: int = 0
+    chunks_total: int = 0
+    files: list[str] = []
+    error: str | None = None
+    result: IngestResponse | None = None   # the receipt, present once status == done
